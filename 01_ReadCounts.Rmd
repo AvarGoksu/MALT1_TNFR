@@ -1,0 +1,84 @@
+```{r}
+rm(list = ls())
+```
+
+
+```{r}
+library(Rsubread)
+library(stringr)
+library(tidyverse)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(biomaRt) 
+```
+
+```{r}
+list_of_bam_0207 <-list.files(path = "/vol/ExtraVol/Krappmann3/20240207/star_out", pattern = ".bam$", full.names = T)
+
+list_of_bam_0301 <-list.files(path = "/vol/ExtraVol/Krappmann3/20240301/star_out", pattern = ".bam$", full.names = T)
+```
+
+```{r}
+subread.counts_0207<-featureCounts(files=list_of_bam_0207, annot.ext="/vol/ExtraVol/Krappmann3/GENCODE_Human_Release_45.gtf",
+isGTFAnnotationFile = TRUE, GTF.featureType="exon", GTF.attrType="gene_id", useMetaFeatures = TRUE, allowMultiOverlap = FALSE, isPairedEnd = TRUE, requireBothEndsMapped=T, nthreads = 24)
+
+subread.counts_0301<-featureCounts(files=list_of_bam_0301, annot.ext="/vol/ExtraVol/Krappmann3/GENCODE_Human_Release_45.gtf",
+isGTFAnnotationFile = TRUE, GTF.featureType="exon", GTF.attrType="gene_id", useMetaFeatures = TRUE, allowMultiOverlap = FALSE, isPairedEnd = TRUE, requireBothEndsMapped=T, nthreads = 24)
+```
+
+```{r}
+rcounts_0207<-subread.counts_0207$counts
+rcounts_0301<-subread.counts_0301$counts
+```
+
+```{r}
+colnames(rcounts_0207) <- str_replace_all(colnames(rcounts_0207), "Aligned.out.bam", "_0207")
+colnames(rcounts_0207) <- str_replace_all(colnames(rcounts_0207), "ample_24L0039", "")
+
+colnames(rcounts_0301) <- str_replace_all(colnames(rcounts_0301), "Aligned.out.bam", "_0301")
+colnames(rcounts_0301) <- str_replace_all(colnames(rcounts_0301), "ample_24L0039", "")
+```
+
+```{r}
+rcounts_merged <- merge(rcounts_0207, rcounts_0301, by=0)
+```
+
+```{r}
+rcounts_merged$Row.names <- str_remove(rcounts_merged$Row.names, "\\..*$")
+```
+
+```{r}
+ensg_symbol <- AnnotationDbi::select(org.Hs.eg.db, keys=rcounts_merged$Row.names, columns='SYMBOL', keytype='ENSEMBL')
+
+length(unique(ensg_symbol$SYMBOL))
+AnnotationDbi::columns(org.Hs.eg.db)
+```
+
+```{r}
+ensembl = useMart( "ensembl", dataset = "hsapiens_gene_ensembl" )
+genemap <- getBM(attributes = c("ensembl_gene_id", "hgnc_symbol"), filters = "ensembl_gene_id",values = rcounts_merged$Row.names, mart = ensembl)
+
+external_gene_names <- getBM(attributes = c("ensembl_gene_id", "external_gene_name"), filters = "ensembl_gene_id",values = rcounts_merged$Row.names, mart = ensembl)
+
+prot_coding <- getBM(attributes=c("ensembl_gene_id","hgnc_symbol","transcript_biotype"),filters = c("transcript_biotype"), values=list("protein_coding"), mart=ensembl)
+
+genemap_filtered <- genemap %>% 
+  subset(hgnc_symbol != "") %>%
+  subset(ensembl_gene_id %in% prot_coding$ensembl_gene_id)
+
+rcounts_merged <- rcounts_merged %>% 
+  subset(Row.names %in% genemap_filtered$ensembl_gene_id)
+
+
+  
+```
+
+
+
+```{r}
+write.csv(rcounts, "rawtable_2nd.csv")
+```
+
+```{r}
+saveRDS(subread.counts, file = "subreadcounts_2nd.rds")
+```
