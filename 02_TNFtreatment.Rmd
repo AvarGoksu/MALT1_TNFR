@@ -1,0 +1,502 @@
+```{r}
+rm(list=ls())
+```
+
+```{r}
+library(reshape2)
+library(ggpubr)
+library(readr)
+library(knitr)
+library(gridExtra)
+library(DESeq2)
+library(ggrepel)
+library(org.Hs.eg.db)
+library(AnnotationDbi)
+library(tidyverse)
+library(enrichplot)
+library(clusterProfiler)
+library(msigdbr)
+library(GSVA)
+library(ComplexHeatmap)
+library(openxlsx)
+library(stringr)
+library(biomaRt)
+library(msigdbr)
+```
+
+```{r}
+rcounts <- read.csv("/Users/slothking/Desktop/Krappmann3/rcounts_merged.csv")
+rownames(rcounts) <- rcounts$Row.names
+rcounts <- rcounts %>% dplyr::select(-c(X, Row.names))
+```
+
+
+```{r}
+cnt <- rcounts[(rowSums(rcounts)>0),] 
+```
+
+```{r}
+genemap <- readRDS("/Users/slothking/Desktop/Krappmann3/genemap.RDS")
+
+genemap <- genemap %>%
+  dplyr::group_by(hgnc_symbol) %>%
+  dplyr::mutate(n_unique_ensembl_id = n()) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(unique_gene_id = case_when(
+    n_unique_ensembl_id > 1 ~ paste0(hgnc_symbol, "_", ensembl_gene_id_version), 
+    .default = hgnc_symbol
+  ))
+```
+
+```{r}
+metadata <- read.xlsx("/Users/slothking/Desktop/Krappmann3/metadata.xlsx")
+#We have two different sequencing rounds with the same samples. The rounds are annotated as 0207 and 0301. Make the coldata:
+coldata_0207 <- metadata %>% dplyr::mutate(Sample_ID = paste0(str_replace_all(Sample_ID, "ample_24L0039", ""), "_0207"),
+                                           Batch = "0207")
+coldata_0301 <- metadata %>% dplyr::mutate(Sample_ID = paste0(str_replace_all(Sample_ID, "ample_24L0039", ""), "_0301"),
+                                           Batch = "0301")
+coldata <- bind_rows(coldata_0207, coldata_0301)
+rownames(coldata) <- coldata$Sample_ID
+```
+
+```{r}
+coldata <- subset(coldata, Sample_Group %in% c("WT_TNF_UT", "WT_TNF_1H", 
+                                               "EA_TNF_UT", "EA_TNF_1H",
+                                               "CAEA_TNF_UT", "CAEA_TNF_1H"))
+
+cnt <- dplyr::select(cnt, coldata$Sample_ID)
+```
+
+```{r}
+cnt <- cnt[, rownames(coldata)]
+all(rownames(coldata) %in% colnames(cnt))
+all(rownames(coldata) == colnames(cnt))
+```
+
+```{r}
+#Add the batch information as a confounder in the design parameter. This will account for the batch effect while calculating the differential expression analysis stats but won't normalize/transform the counts for the batch effect. We will do this later below.
+dds <- DESeqDataSetFromMatrix(countData = cnt,
+                              colData = coldata,
+                              design = ~Batch+Sample_Group)
+dds<- DESeq(dds)
+```
+
+```{r}
+#Apply variance stabilizing transformation on the counts
+vsd <- vst(dds, blind=FALSE)
+vsdMat <- assay(vsd)
+```
+
+```{r}
+#Calculate and visualize PCA with the batch effect
+
+pcaData <- plotPCA(vsd, intgroup=c("Sample_Group", "Batch"), returnData=TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+
+png(file="TNFdataset/PCA_vst_WithBatchEffect_SampleGroups_TNFdataset.png", height=1080, width=720)
+ggplot(pcaData, aes(PC1, PC2, color=Sample_Group)) +
+  geom_point(size=7) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  theme(axis.title = element_text(size = 20))+
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+  theme(axis.title = element_text(size = 20))+
+  ggtitle("PCA With Batch Effect (TNF Dataset - Sample Groups)") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line(), plot.title = element_text(size=25))+
+  coord_fixed()
+dev.off()
+
+png(file="TNFdataset/PCA_vst_WithBatchEffect_Batches_TNFdataset.png", height=1080, width=720)
+ggplot(pcaData, aes(PC1, PC2, color=Batch)) +
+  geom_point(size=7) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  theme(axis.title = element_text(size = 20))+
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+  theme(axis.title = element_text(size = 20))+
+  ggtitle("PCA With Batch Effect (TNF Dataset - Batches)") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line(), plot.title = element_text(size=25))+
+  coord_fixed()
+dev.off()
+```
+
+```{r}
+#Correct for the batch effect on the variance stabilized counts for downstream analyses and count visualizations
+
+assay(vsd) <- limma::removeBatchEffect(assay(vsd),
+  batch = colData(dds)[,'Batch'])
+
+vsdmelted_temp <- melt(vsdMat)
+colnames(vsdmelted_temp) <- c("ensembl_gene_id_version", "Sample_ID", "Count")
+
+vsdmelted <- merge(vsdmelted_temp, genemap, by = "ensembl_gene_id_version")
+```
+
+```{r}
+#Calculate and visualize PCA after removing the batch effect
+
+pcaData <- plotPCA(vsd, intgroup=c("Sample_Group", "Batch"), returnData=TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+
+png(file="TNFdataset/PCA_vst_BatchRemoved_SampleGroups_TNFdataset.png", height=1080, width=720)
+ggplot(pcaData, aes(PC1, PC2, color=Sample_Group)) +
+  geom_point(size=7) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  theme(axis.title = element_text(size = 20))+
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+  theme(axis.title = element_text(size = 20))+
+  ggtitle("PCA With Batch Effect (TNF Dataset - Sample Groups)") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line(), plot.title = element_text(size=25))+
+  coord_fixed()
+dev.off()
+
+png(file="TNFdataset/PCA_vst_BatchRemoved_Batches_TNFdataset.png", height=1080, width=720)
+ggplot(pcaData, aes(PC1, PC2, color=Batch)) +
+  geom_point(size=7) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  theme(axis.title = element_text(size = 20))+
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+  theme(axis.title = element_text(size = 20))+
+  ggtitle("PCA With Batch Effect (TNF Dataset - Batches)") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line(), plot.title = element_text(size=25))+
+  coord_fixed()
+dev.off()
+```
+
+```{r}
+res_wt_TNFvsUT <- DESeq2::results(dds, contrast=c("Sample_Group","WT_TNF_1H","WT_TNF_UT"), alpha = 0.05)
+summary(res_wt_TNFvsUT)
+
+wt_TNFvsUT_list<-data.frame(gene = rownames(res_wt_TNFvsUT), res_wt_TNFvsUT, stringsAsFactors = F) %>% 
+  na.omit() %>% 
+  dplyr::select("log2FoldChange", "padj") %>% 
+  tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
+  dplyr::mutate(padj = case_when(padj == 0 ~ .Machine$double.xmin,
+                                TRUE ~ padj), 
+                signed_padj = sign(log2FoldChange)*-log10(padj),
+                minuslogp = -log10(padj)) %>%
+  merge(genemap, by="ensembl_gene_id_version") %>%
+  dplyr::arrange(desc(signed_padj)) 
+
+write.xlsx(wt_TNFvsUT_list, "TNFdataset/wt_TNFvsUT.xlsx")
+```
+
+```{r}
+res_ea_TNFvsUT <- DESeq2::results(dds, contrast=c("Sample_Group","EA_TNF_1H","EA_TNF_UT"), alpha = 0.05)
+summary(res_ea_TNFvsUT)
+
+ea_TNFvsUT_list<-data.frame(gene = rownames(res_ea_TNFvsUT), res_ea_TNFvsUT, stringsAsFactors = F) %>% 
+  na.omit() %>% 
+  dplyr::select("log2FoldChange", "padj") %>% 
+  tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
+  dplyr::mutate(padj = case_when(padj == 0 ~ .Machine$double.xmin,
+                                TRUE ~ padj), 
+                signed_padj = sign(log2FoldChange)*-log10(padj),
+                minuslogp = -log10(padj)) %>%
+  merge(genemap, by="ensembl_gene_id_version") %>%
+  dplyr::arrange(desc(signed_padj)) 
+
+write.xlsx(ea_TNFvsUT_list, "TNFdataset/ea_TNFvsUT.xlsx")
+```
+```{r}
+res_caea_TNFvsUT <- DESeq2::results(dds, contrast=c("Sample_Group","CAEA_TNF_1H","CAEA_TNF_UT"), alpha = 0.05)
+summary(res_caea_TNFvsUT)
+
+caea_TNFvsUT_list<-data.frame(gene = rownames(res_caea_TNFvsUT), res_caea_TNFvsUT, stringsAsFactors = F) %>% 
+  na.omit() %>% 
+  dplyr::select("log2FoldChange", "padj") %>% 
+  tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
+  dplyr::mutate(padj = case_when(padj == 0 ~ .Machine$double.xmin,
+                                TRUE ~ padj), 
+                signed_padj = sign(log2FoldChange)*-log10(padj),
+                minuslogp = -log10(padj)) %>%
+  merge(genemap, by="ensembl_gene_id_version") %>%
+  dplyr::arrange(desc(signed_padj)) 
+
+write.xlsx(caea_TNFvsUT_list, "TNFdataset/caea_TNFvsUT.xlsx")
+```
+```{r}
+selected_genes <- unique(intersect(
+  intersect(subset(wt_TNFvsUT_list, abs(log2FoldChange) >= 0.5 & padj <= 0.05)$ensembl_gene_id_version,
+            subset(ea_TNFvsUT_list, abs(log2FoldChange) >= 0.5 & padj <= 0.05)$ensembl_gene_id_version),
+  subset(caea_TNFvsUT_list, abs(log2FoldChange) >= 0.5 & padj <= 0.05)$ensembl_gene_id_version))
+```
+
+```{r}
+data_heatmap <- subset(vsdMat, rownames(vsdMat) %in% selected_genes)
+
+scaled_data = t(scale(t(data_heatmap)))
+
+coldata <- coldata %>% dplyr::arrange(desc(Sample_Group))
+
+ordered_data <- as.data.frame(scaled_data[,coldata$Sample_ID])
+
+ordered_data$ensembl_gene_id_version <- rownames(ordered_data)
+
+ordered_data_temp <- merge(ordered_data, genemap, by="ensembl_gene_id_version")
+
+rownames(ordered_data_temp) <-ordered_data_temp$unique_gene_id
+
+ordered_data <- ordered_data_temp[,coldata$Sample_ID]
+
+group_labels <- factor(sort(coldata$Sample_Group, decreasing=TRUE))
+group_labels_unique <- unique(group_labels)
+group_colors <- c("#FF5733", "#33FF57", "#337AFF", "#FF33E9", "#FFD700", "#800080")
+names(group_colors) <- group_labels_unique
+
+
+
+column_annotation <- HeatmapAnnotation(
+  group = group_labels,
+  col = list(group = group_colors)
+)
+
+
+pdf("TNFdataset/Heatmap_TNFdataset.pdf", width = 6, height = 3.5)
+Heatmap(ordered_data, 
+        name = "Expression", 
+        show_row_names = TRUE, 
+        show_column_names = TRUE,
+        cluster_columns = FALSE,
+        cluster_rows = TRUE,
+        row_names_gp = gpar(fontsize = 5),
+        top_annotation = column_annotation,
+        column_names_gp = gpar(fontsize = 4))
+dev.off()
+```
+
+```{r}
+reactome_genesets <- msigdbr(species = "Homo sapiens", 
+                             category = "C2", 
+                             subcategory = "CP:REACTOME") %>% 
+  dplyr::select(gs_name, ensembl_gene) %>% distinct()
+
+go_genesets <- msigdbr(species = "Homo sapiens", 
+                             category = "C5", 
+                             subcategory = "GO:BP") %>% 
+  dplyr::select(gs_name, ensembl_gene) %>% distinct()
+
+tft_genesets_legacy <- msigdbr(species = "Homo sapiens", 
+                             category = "C3",
+                             subcategory = "TFT:TFT_Legacy") %>% 
+  dplyr::select(gs_name, ensembl_gene) %>% distinct()
+
+tft_genesets_gtrd <- msigdbr(species = "Homo sapiens", 
+                             category = "C3",
+                             subcategory = "TFT:GTRD") %>% 
+  dplyr::select(gs_name, ensembl_gene) %>% distinct()
+
+tft_genesets <- bind_rows(tft_genesets_legacy, tft_genesets_gtrd)
+```
+
+```{r}
+df_wt_TNFvsUT_gsea_pos <- subset(wt_TNFvsUT_list, signed_padj > 0) %>%
+  arrange(signed_padj, abs(log2FoldChange)) %>%
+  mutate(rank = row_number()) %>%
+  arrange(desc(rank))
+
+df_wt_TNFvsUT_gsea_neg <- subset(wt_TNFvsUT_list, signed_padj < 0) %>%
+  arrange(desc(signed_padj), abs(log2FoldChange)) %>%
+  mutate(rank = -row_number()) %>%
+  arrange(desc(rank))
+
+df_wt_TNFvsUT_gsea <- bind_rows(df_wt_TNFvsUT_gsea_pos, df_wt_TNFvsUT_gsea_neg)
+
+wt_TNFvsUT_ranked<-df_wt_TNFvsUT_gsea$rank
+names(wt_TNFvsUT_ranked)<-str_remove(df_wt_TNFvsUT_gsea$ensembl_gene_id_version, "\\..*$")
+
+reac_enrich_wt_TNFvsUT <- GSEA(wt_TNFvsUT_ranked, TERM2GENE = reactome_genesets, eps = 0, pvalueCutoff = 0.05)
+reac_enrich_wt_TNFvsUT <- setReadable(reac_enrich_wt_TNFvsUT, 'org.Hs.eg.db', 'ENSEMBL')
+reac_enrich_wt_TNFvsUT <- reac_enrich_wt_TNFvsUT@result %>%
+  dplyr::mutate(signed_padj = sign(NES)*-log10(p.adjust)) %>%
+  dplyr::arrange(desc(signed_padj))
+
+tft_enrich_wt_TNFvsUT <- GSEA(wt_TNFvsUT_ranked, TERM2GENE = tft_genesets, eps = 0, pvalueCutoff = 0.05)
+tft_enrich_wt_TNFvsUT <- setReadable(tft_enrich_wt_TNFvsUT, 'org.Hs.eg.db', 'ENSEMBL')
+tft_enrich_wt_TNFvsUT <- tft_enrich_wt_TNFvsUT@result %>%
+  dplyr::mutate(signed_padj = sign(NES)*-log10(p.adjust)) %>%
+  dplyr::arrange(desc(signed_padj))
+```
+
+```{r}
+df_ea_TNFvsUT_gsea_pos <- subset(ea_TNFvsUT_list, signed_padj > 0) %>%
+  arrange(signed_padj, abs(log2FoldChange)) %>%
+  mutate(rank = row_number()) %>%
+  arrange(desc(rank))
+
+df_ea_TNFvsUT_gsea_neg <- subset(ea_TNFvsUT_list, signed_padj < 0) %>%
+  arrange(desc(signed_padj), abs(log2FoldChange)) %>%
+  mutate(rank = -row_number()) %>%
+  arrange(desc(rank))
+
+df_ea_TNFvsUT_gsea <- bind_rows(df_ea_TNFvsUT_gsea_pos, df_ea_TNFvsUT_gsea_neg)
+
+ea_TNFvsUT_ranked<-df_ea_TNFvsUT_gsea$rank
+names(ea_TNFvsUT_ranked)<-str_remove(df_ea_TNFvsUT_gsea$ensembl_gene_id_version, "\\..*$")
+
+
+reac_enrich_ea_TNFvsUT <- GSEA(ea_TNFvsUT_ranked, TERM2GENE = reactome_genesets, eps = 0, pvalueCutoff = 0.05)
+reac_enrich_ea_TNFvsUT <- setReadable(reac_enrich_ea_TNFvsUT, 'org.Hs.eg.db', 'ENSEMBL')
+reac_enrich_ea_TNFvsUT <- reac_enrich_ea_TNFvsUT@result %>%
+  dplyr::mutate(signed_padj = sign(NES)*-log10(p.adjust)) %>%
+  dplyr::arrange(desc(signed_padj))
+
+tft_enrich_ea_TNFvsUT <- GSEA(ea_TNFvsUT_ranked, TERM2GENE = tft_genesets, eps = 0, pvalueCutoff = 0.05)
+tft_enrich_ea_TNFvsUT <- setReadable(tft_enrich_ea_TNFvsUT, 'org.Hs.eg.db', 'ENSEMBL')
+tft_enrich_ea_TNFvsUT <- tft_enrich_ea_TNFvsUT@result %>%
+  dplyr::mutate(signed_padj = sign(NES)*-log10(p.adjust)) %>%
+  dplyr::arrange(desc(signed_padj))
+```
+
+```{r}
+df_caea_TNFvsUT_gsea_pos <- subset(caea_TNFvsUT_list, signed_padj > 0) %>%
+  arrange(signed_padj, abs(log2FoldChange)) %>%
+  mutate(rank = row_number()) %>%
+  arrange(desc(rank))
+
+df_caea_TNFvsUT_gsea_neg <- subset(caea_TNFvsUT_list, signed_padj < 0) %>%
+  arrange(desc(signed_padj), abs(log2FoldChange)) %>%
+  mutate(rank = -row_number()) %>%
+  arrange(desc(rank))
+
+df_caea_TNFvsUT_gsea <- bind_rows(df_caea_TNFvsUT_gsea_pos, df_caea_TNFvsUT_gsea_neg)
+
+caea_TNFvsUT_ranked<-df_caea_TNFvsUT_gsea$rank
+names(caea_TNFvsUT_ranked)<-str_remove(df_caea_TNFvsUT_gsea$ensembl_gene_id_version, "\\..*$")
+
+reac_enrich_caea_TNFvsUT <- GSEA(caea_TNFvsUT_ranked, TERM2GENE = reactome_genesets, eps = 0, pvalueCutoff = 0.05)
+reac_enrich_caea_TNFvsUT <- setReadable(reac_enrich_caea_TNFvsUT, 'org.Hs.eg.db', 'ENSEMBL')
+reac_enrich_caea_TNFvsUT <- reac_enrich_caea_TNFvsUT@result %>%
+  dplyr::mutate(signed_padj = sign(NES)*-log10(p.adjust)) %>%
+  dplyr::arrange(desc(signed_padj))
+
+tft_enrich_caea_TNFvsUT <- GSEA(caea_TNFvsUT_ranked, TERM2GENE = tft_genesets, eps = 0, pvalueCutoff = 0.05)
+tft_enrich_caea_TNFvsUT <- setReadable(tft_enrich_caea_TNFvsUT, 'org.Hs.eg.db', 'ENSEMBL')
+tft_enrich_caea_TNFvsUT <- tft_enrich_caea_TNFvsUT@result %>%
+  dplyr::mutate(signed_padj = sign(NES)*-log10(p.adjust)) %>%
+  dplyr::arrange(desc(signed_padj))
+```
+
+```{r}
+reactome_genesets_subset <- reactome_genesets %>% 
+  subset(gs_name %in% c("REACTOME_TNFR2_NON_CANONICAL_NF_KB_PATHWAY",
+                        "REACTOME_NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL"))
+
+reactome_list <- unlist(split(reactome_genesets_subset, 
+                              f = reactome_genesets_subset$gs_name), 
+                        recursive = F)
+
+vsdMat_ensembl <- vsdMat
+rownames(vsdMat_ensembl) <- str_remove(rownames(vsdMat), "\\..*$")
+
+gsva_object <- gsvaParam(exprData = as.matrix(vsdMat_ensembl), geneSets = reactome_list)
+gsva_res_reactome <- gsva(gsva_object, verbose=FALSE)
+
+gsva_res_reactome_melted <- reshape2::melt(gsva_res_reactome, 
+                                           varnames=c('GeneSet', 'Sample_ID'),
+                                           value.name = "GSVAscore") %>%
+  dplyr::mutate(GeneSet = str_remove_all(GeneSet, ".gene_symbol"),
+                GeneSet = str_remove_all(GeneSet, "REACTOME_"))
+
+gsva_res_reactome_merged <- merge(gsva_res_reactome_melted, coldata, by="Sample_ID")
+
+gsva_res_reactome_merged$Sample_Group <- factor(gsva_res_reactome_merged$Sample_Group, levels =
+                                                                   c("WT_TNF_UT", "WT_TNF_1H", 
+                                                                     "EA_TNF_UT","EA_TNF_1H",
+                                                                     "CAEA_TNF_UT", "CAEA_TNF_1H"))
+
+gsva_res_reactome_merged <- gsva_res_reactome_merged %>% arrange(Sample_Group)
+
+# Define group colors
+group_colors <- c("WT_TNF_UT" = "#FF5733",
+                  "WT_TNF_1H" = "#33FF57",
+                  "EA_TNF_UT" = "#337AFF",
+                  "EA_TNF_1H" = "#FF33E9",
+                  "CAEA_TNF_UT" = "#FFD700",
+                  "CAEA_TNF_1H" = "#800080")
+
+# Calculate means for each SampleGroup
+median <- gsva_res_reactome_merged %>%
+  group_by(Sample_Group, GeneSet) %>%
+  summarize(median_GSVAscore = median(GSVAscore))
+
+pdf("TNFdataset/GSVAexample.pdf", width = 10, height = 4)
+ggplot(gsva_res_reactome_merged, aes(y = GSVAscore, x = Sample_Group, color = Sample_Group)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.1) +
+  scale_color_manual(values = group_colors) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+        strip.text = element_text(size = 8)) +
+  facet_wrap(~GeneSet, ncol = 3, nrow=3)
+dev.off()
+```
+
+```{r}
+vsd_counts_melted_selectedgenes <- subset(vsdmelted, ensembl_gene_id_version %in% selected_genes)
+
+vsd_counts_melted_selectedgenes_annotated <- merge(vsd_counts_melted_selectedgenes, coldata, by="Sample_ID") 
+
+vsd_counts_melted_selectedgenes_annotated$Sample_Group <- factor(vsd_counts_melted_selectedgenes_annotated$Sample_Group, levels =
+                                                                   c("WT_TNF_UT", "WT_TNF_1H", 
+                                                                     "EA_TNF_UT","EA_TNF_1H",
+                                                                     "CAEA_TNF_UT", "CAEA_TNF_1H"))
+
+vsd_counts_melted_selectedgenes_annotated <- vsd_counts_melted_selectedgenes_annotated %>% arrange(Sample_Group)
+
+#Not actually subsetting here because we are choosing the entire dataset but this is how to subset in case if it is needed.
+vsd_counts_melted_selectedgenes_annotated_subset <- subset(vsd_counts_melted_selectedgenes_annotated, Sample_Group %in%
+                                                             c("WT_TNF_UT", "WT_TNF_1H", 
+                                                               "EA_TNF_UT","EA_TNF_1H",
+                                                               "CAEA_TNF_UT", "CAEA_TNF_1H"))
+
+
+# Start a new PDF file with 1 plot per page
+pdf("TNFdataset/gene_boxplots_TNFdataset.pdf", width = 1.8, height=3)
+
+# Loop over each gene and create a plot on a new page
+for (g in unique(vsd_counts_melted_selectedgenes_annotated_subset$ensembl_gene_id_version)) {
+  # Subset the data for the current gene
+  gene_data <- subset(vsd_counts_melted_selectedgenes_annotated_subset, ensembl_gene_id_version == g)
+  # Create the plot for the current gene
+  p <- ggplot(gene_data, aes(x = Sample_Group, y = Count, color = Sample_Group)) +
+    geom_boxplot(outlier.shape = NA) +
+    geom_jitter(width = 0.1) +
+    scale_color_manual(values=c("WT_TNF_UT" = "#FF5733",
+                                "WT_TNF_1H" = "#33FF57",
+                                "EA_TNF_UT" = "#337AFF",
+                                "EA_TNF_1H" = "#FF33E9",
+                                "CAEA_TNF_UT" = "#FFD700",
+                                "CAEA_TNF_1H" = "#800080")) +
+    ylab("Normalized Count") +
+    ggtitle(paste(gene_data$unique_gene_id)) +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+          panel.background = element_blank(),
+          plot.background = element_blank(), 
+          axis.line = element_line(), 
+          axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+          plot.title = element_text(size=6),
+          axis.title.x = element_blank(),
+          axis.title.y = element_text(size=10))+
+    # theme(axis.title.x = element_blank(),
+    #       axis.ticks.x = element_blank(),
+    #       strip.background = element_blank(),
+    #       strip.placement = "outside",
+    #       strip.text = element_text(size = 10, face = "bold"),
+    #       axis.text.x = element_text(angle = 90))+ 
+    guides(color="none")
+  
+  # Print the plot for the current gene on a new page
+  print(p)
+}
+
+# Close the PDF file
+dev.off()
+```
+
