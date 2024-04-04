@@ -44,41 +44,34 @@ rcounts_merged <- merge(rcounts_0207, rcounts_0301, by=0)
 ```
 
 ```{r}
-rcounts_merged$Row.names <- str_remove(rcounts_merged$Row.names, "\\..*$")
-```
-
-```{r}
-ensg_symbol <- AnnotationDbi::select(org.Hs.eg.db, keys=rcounts_merged$Row.names, columns='SYMBOL', keytype='ENSEMBL')
-
-length(unique(ensg_symbol$SYMBOL))
-AnnotationDbi::columns(org.Hs.eg.db)
+#rcounts_merged$Row.names <- str_remove(rcounts_merged$Row.names, "\\..*$")
 ```
 
 ```{r}
 ensembl = useMart( "ensembl", dataset = "hsapiens_gene_ensembl" )
-genemap <- getBM(attributes = c("ensembl_gene_id", "hgnc_symbol"), filters = "ensembl_gene_id",values = rcounts_merged$Row.names, mart = ensembl)
+genemap <- getBM(attributes = c("ensembl_gene_id_version", "hgnc_symbol"), filters = "ensembl_gene_id_version",values = rcounts_merged$Row.names, mart = ensembl)
 
-external_gene_names <- getBM(attributes = c("ensembl_gene_id", "external_gene_name"), filters = "ensembl_gene_id",values = rcounts_merged$Row.names, mart = ensembl)
+#external_gene_names <- getBM(attributes = c("ensembl_gene_id", "external_gene_name"), filters = "ensembl_gene_id",values = rcounts_merged$Row.names, mart = ensembl)
 
-prot_coding <- getBM(attributes=c("ensembl_gene_id","hgnc_symbol","transcript_biotype"),filters = c("transcript_biotype"), values=list("protein_coding"), mart=ensembl)
+prot_coding <- getBM(attributes=c("ensembl_gene_id_version","hgnc_symbol","transcript_biotype"),filters = c("transcript_biotype"), values=list("protein_coding"), mart=ensembl)
+
+mane <- read.delim("/vol/ExtraVol/Krappmann3/MANE.GRCh38.v1.3.summary.txt")
+mane <- mane %>% 
+  dplyr::select(c(Ensembl_Gene, symbol)) %>%
+  dplyr::rename("ensembl_gene_id_version" = "Ensembl_Gene",
+                "hgnc_symbol" = "symbol")
 
 genemap_filtered <- genemap %>% 
   subset(hgnc_symbol != "") %>%
-  subset(ensembl_gene_id %in% prot_coding$ensembl_gene_id)
+  subset(ensembl_gene_id_version %in% prot_coding$ensembl_gene_id_version) %>%
+  subset(ensembl_gene_id_version %in% mane$ensembl_gene_id_version)
 
 rcounts_merged <- rcounts_merged %>% 
-  subset(Row.names %in% genemap_filtered$ensembl_gene_id)
-
-
-  
+  subset(Row.names %in% genemap_filtered$ensembl_gene_id_version)
 ```
 
 
-
 ```{r}
-write.csv(rcounts, "rawtable_2nd.csv")
-```
-
-```{r}
-saveRDS(subread.counts, file = "subreadcounts_2nd.rds")
+saveRDS(genemap_filtered, "/vol/ExtraVol/Krappmann3/genemap.RDS")
+write.csv(rcounts_merged, "/vol/ExtraVol/Krappmann3/rcounts_merged.csv")
 ```
