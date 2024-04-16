@@ -36,23 +36,24 @@ cnt <- rcounts[(rowSums(rcounts)>0),]
 ```
 
 ```{r}
-#The below code creates and saves the ENSEMBL-to-HGNC gene mapping data frame. Once it is run, comment it out and just read the saved data frame, so the code can work without internet connection later.
-ensembl = useMart( "ensembl", dataset = "hsapiens_gene_ensembl" )
-genemap <- getBM(attributes = c("ensembl_gene_id_version", "hgnc_symbol"), filters = "ensembl_gene_id_version",values = rownames(cnt), mart = ensembl)
-saveRDS(genemap, "/Users/slothking/Desktop/Krappmann3/genemap.RDS")
-
 genemap <- readRDS("/Users/slothking/Desktop/Krappmann3/genemap.RDS")
-```
 
-```{r}
 genemap <- genemap %>%
   dplyr::group_by(hgnc_symbol) %>%
   dplyr::mutate(n_unique_ensembl_id = n()) %>%
   dplyr::ungroup() %>%
   dplyr::mutate(unique_gene_id = case_when(
     n_unique_ensembl_id > 1 ~ paste0(hgnc_symbol, "_", ensembl_gene_id_version), 
-    .default = hgnc_symbol
-  ))
+    .default = hgnc_symbol),
+    ensembl_gene_id = str_remove(ensembl_gene_id_version, "\\..*$"))
+
+### In case ENTREZ IDs are needed:
+
+# genemap$entrez = mapIds(org.Hs.eg.db,
+#                     keys=genemap$ensembl_gene_id, #Column containing Ensembl gene ids
+#                     column="ENTREZID",
+#                     keytype="ENSEMBL",
+#                     multiVals="first")
 ```
 
 ```{r}
@@ -63,12 +64,29 @@ coldata_0207 <- metadata %>% dplyr::mutate(Sample_ID = paste0(str_replace_all(Sa
 coldata_0301 <- metadata %>% dplyr::mutate(Sample_ID = paste0(str_replace_all(Sample_ID, "ample_24L0039", ""), "_0301"),
                                            Batch = "0301")
 coldata <- bind_rows(coldata_0207, coldata_0301)
-rownames(coldata) <- coldata$Sample_ID
 ```
 
 ```{r}
-coldata <- subset(coldata, Sample_Group %in% c("WT_PMATNF_UT", "WT_PMA_2H", "WT_PMA_2H_TNF_1H", 
-                                               "CA_PMATNF_UT", "CA_PMA_2H", "CA_PMA_2H_TNF_1H"))
+# Define the desired order for Sample_Group
+desired_order <- c("WT_PMATNF_UT", "WT_PMA_2H", "WT_PMA_2H_TNF_1H",
+                   "CA_PMATNF_UT", "CA_PMA_2H", "CA_PMA_2H_TNF_1H")
+
+coldata <- subset(coldata, Sample_Group %in% desired_order)
+
+coldata <- coldata %>% 
+  dplyr::arrange(desc(Sample_Group)) %>%
+  dplyr::group_by(Sample_Group) %>%
+  dplyr::arrange(Sample_ID) %>%
+  dplyr::ungroup()
+
+# Convert Sample_Group to a factor and specify the level order
+coldata$Sample_Group <- factor(coldata$Sample_Group, levels = desired_order)
+
+# Arrange the dataframe by the ordered factor
+coldata <- coldata %>% dplyr::arrange(Sample_Group)
+
+
+rownames(coldata) <- coldata$Sample_ID
 
 cnt <- dplyr::select(cnt, coldata$Sample_ID)
 ```
@@ -96,7 +114,7 @@ pcaData <- plotPCA(vsd, intgroup=c("Sample_Group", "Batch"), returnData=TRUE)
 percentVar <- round(100 * attr(pcaData, "percentVar"))
 
 
-png(file="PMAdataset/PCA_vst_WithBatchEffect_SampleGroups_PMAdataset.png", height=1080, width=720)
+pdf(file="PMAdataset/PCA_vst_WithBatchEffect_SampleGroups_PMAdataset.pdf", height=5, width=9)
 ggplot(pcaData, aes(PC1, PC2, color=Sample_Group)) +
   geom_point(size=7) +
   xlab(paste0("PC1: ",percentVar[1],"% variance")) +
@@ -105,11 +123,10 @@ ggplot(pcaData, aes(PC1, PC2, color=Sample_Group)) +
   theme(axis.title = element_text(size = 20))+
   ggtitle("PCA With Batch Effect (PMA Dataset - Sample Groups)") +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line(), plot.title = element_text(size=25))+
-  coord_fixed()
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line(), plot.title = element_text(size=20))
 dev.off()
 
-png(file="PMAdataset/PCA_vst_WithBatchEffect_Batches_PMAdataset.png", height=1080, width=720)
+pdf(file="PMAdataset/PCA_vst_WithBatchEffect_Batches_PMAdataset.pdf", height=5, width=9)
 ggplot(pcaData, aes(PC1, PC2, color=Batch)) +
   geom_point(size=7) +
   xlab(paste0("PC1: ",percentVar[1],"% variance")) +
@@ -118,8 +135,7 @@ ggplot(pcaData, aes(PC1, PC2, color=Batch)) +
   theme(axis.title = element_text(size = 20))+
   ggtitle("PCA With Batch Effect (PMA Dataset - Batches)") +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line(), plot.title = element_text(size=25))+
-  coord_fixed()
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line(), plot.title = element_text(size=20))
 dev.off()
 ```
 
@@ -138,30 +154,28 @@ pcaData <- plotPCA(vsd, intgroup=c("Sample_Group", "Batch"), returnData=TRUE)
 percentVar <- round(100 * attr(pcaData, "percentVar"))
 
 
-png(file="PMAdataset/PCA_vst_BatchRemoved_SampleGroups_PMAdataset.png", height=1080, width=720)
+pdf(file="PMAdataset/PCA_vst_BatchRemoved_SampleGroups_PMAdataset.pdf", height=5, width=9)
 ggplot(pcaData, aes(PC1, PC2, color=Sample_Group)) +
   geom_point(size=7) +
   xlab(paste0("PC1: ",percentVar[1],"% variance")) +
   theme(axis.title = element_text(size = 20))+
   ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
   theme(axis.title = element_text(size = 20))+
-  ggtitle("PCA With Batch Effect (PMA Dataset - Sample Groups)") +
+  ggtitle("PCA Without Batch Effect (PMA Dataset - Sample Groups)") +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line(), plot.title = element_text(size=25))+
-  coord_fixed()
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line(), plot.title = element_text(size=20))
 dev.off()
 
-png(file="PMAdataset/PCA_vst_BatchRemoved_Batches_PMAdataset.png", height=1080, width=720)
+pdf(file="PMAdataset/PCA_vst_BatchRemoved_Batches_PMAdataset.pdf", height=5, width=9)
 ggplot(pcaData, aes(PC1, PC2, color=Batch)) +
   geom_point(size=7) +
   xlab(paste0("PC1: ",percentVar[1],"% variance")) +
   theme(axis.title = element_text(size = 20))+
   ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
   theme(axis.title = element_text(size = 20))+
-  ggtitle("PCA With Batch Effect (PMA Dataset - Batches)") +
+  ggtitle("PCA Without Batch Effect (PMA Dataset - Batches)") +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line(), plot.title = element_text(size=25))+
-  coord_fixed()
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line(), plot.title = element_text(size=20))
 dev.off()
 ```
 
@@ -283,6 +297,34 @@ ca_PMATNFvsPMA_neg <- subset(ca_PMATNFvsPMA_list, signed_padj < 0) %>%
 ca_PMATNFvsPMA_list <- bind_rows(ca_PMATNFvsPMA_pos, ca_PMATNFvsPMA_neg) %>% dplyr::arrange(desc(rank))
 write.xlsx(ca_PMATNFvsPMA_list, "PMAdataset/ca_PMATNFvsPMA.xlsx")
 ```
+```{r}
+res_PMATNF_CAvsWT <- DESeq2::results(dds, contrast=c("Sample_Group","CA_PMA_2H_TNF_1H","WT_PMA_2H_TNF_1H"), alpha = 0.05)
+summary(res_PMATNF_CAvsWT)
+
+PMATNF_CAvsWT_list<-data.frame(gene = rownames(res_PMATNF_CAvsWT), res_PMATNF_CAvsWT, stringsAsFactors = F) %>% 
+  na.omit() %>% 
+  dplyr::select("log2FoldChange", "padj") %>% 
+  tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
+  dplyr::mutate(padj = case_when(padj == 0 ~ .Machine$double.xmin,
+                                TRUE ~ padj), 
+                signed_padj = sign(log2FoldChange)*-log10(padj),
+                minuslogp = -log10(padj)) %>%
+  merge(genemap, by="ensembl_gene_id_version") %>%
+  dplyr::arrange(desc(signed_padj)) 
+
+PMATNF_CAvsWT_pos <- subset(PMATNF_CAvsWT_list, signed_padj > 0) %>%
+  arrange(signed_padj, abs(log2FoldChange)) %>%
+  mutate(rank = row_number()) %>%
+  arrange(desc(rank))
+
+PMATNF_CAvsWT_neg <- subset(PMATNF_CAvsWT_list, signed_padj < 0) %>%
+  arrange(desc(signed_padj), abs(log2FoldChange)) %>%
+  mutate(rank = -row_number()) %>%
+  arrange(desc(rank))
+
+PMATNF_CAvsWT_list <- bind_rows(PMATNF_CAvsWT_pos, PMATNF_CAvsWT_neg) %>% dplyr::arrange(desc(rank))
+write.xlsx(PMATNF_CAvsWT_list, "PMAdataset/PMATNF_CAvsWT.xlsx")
+```
 
 ```{r}
 selected_genes <- unique(
@@ -290,24 +332,14 @@ selected_genes <- unique(
   intersect(subset(ca_PMAvsUT_list, abs(log2FoldChange) >= 0.5 & padj <= 0.05)$ensembl_gene_id_version,
   intersect(subset(wt_PMATNFvsPMA_list, abs(log2FoldChange) >= 0.5 & padj <= 0.05)$ensembl_gene_id_version,
             subset(ca_PMATNFvsPMA_list, abs(log2FoldChange) >= 0.5 & padj <= 0.05)$ensembl_gene_id_version))))
+
+selected_genes <- readRDS("tnfUP_signature.RDS")
 ```
 
 ```{r}
 data_heatmap <- subset(vsdMat, rownames(vsdMat) %in% selected_genes)
 
 scaled_data = t(scale(t(data_heatmap)))
-
-# Define the desired order for Sample_Group
-desired_order <- c("WT_PMATNF_UT", "WT_PMA_2H", "WT_PMA_2H_TNF_1H",
-                   "CA_PMATNF_UT", "CA_PMA_2H", "CA_PMA_2H_TNF_1H")
-
-# Convert Sample_Group to a factor and specify the level order
-coldata$Sample_Group <- factor(coldata$Sample_Group, levels = desired_order)
-
-# Arrange the dataframe by the ordered factor
-coldata <- coldata %>% arrange(Sample_Group)
-
-coldata <- coldata %>% dplyr::arrange(Sample_Group)
 
 ordered_data <- as.data.frame(scaled_data[,coldata$Sample_ID])
 
@@ -319,7 +351,7 @@ rownames(ordered_data_temp) <-ordered_data_temp$unique_gene_id
 
 ordered_data <- as.matrix(ordered_data_temp[,coldata$Sample_ID])
 
-group_labels <- coldata$Sample_Group
+group_labels <- factor(coldata$Sample_Group)
 group_labels_unique <- unique(group_labels)
 group_colors <- c("#FF5733", "#33FF57", "#337AFF", "#FF33E9", "#FFD700", "#800080")
 names(group_colors) <- group_labels_unique
@@ -332,7 +364,49 @@ column_annotation <- HeatmapAnnotation(
 )
 
 
-pdf("PMAdataset/Heatmap_PMAdataset.pdf", width = 8, height = 8)
+pdf("PMAdataset/Heatmap_PMAdataset.pdf", width = 8, height = 5)
+Heatmap(ordered_data, 
+        name = "Expression", 
+        show_row_names = TRUE, 
+        show_column_names = TRUE,
+        cluster_columns = FALSE,
+        cluster_rows = TRUE,
+        row_names_gp = gpar(fontsize = 5),
+        top_annotation = column_annotation,
+        column_names_gp = gpar(fontsize = 4))
+dev.off()
+```
+
+```{r}
+data_heatmap <- subset(vsdMat, rownames(vsdMat) %in% subset(PMATNF_CAvsWT_list, 
+                                                            log2FoldChange <= -0.75 & padj <= 0.05)$ensembl_gene_id_version)
+
+scaled_data = t(scale(t(data_heatmap)))
+
+ordered_data <- as.data.frame(scaled_data[,coldata$Sample_ID])
+
+ordered_data$ensembl_gene_id_version <- rownames(ordered_data)
+
+ordered_data_temp <- merge(ordered_data, genemap, by="ensembl_gene_id_version")
+
+rownames(ordered_data_temp) <-ordered_data_temp$unique_gene_id
+
+ordered_data <- as.matrix(ordered_data_temp[,coldata$Sample_ID])
+
+group_labels <- factor(coldata$Sample_Group)
+group_labels_unique <- unique(group_labels)
+group_colors <- c("#FF5733", "#33FF57", "#337AFF", "#FF33E9", "#FFD700", "#800080")
+names(group_colors) <- group_labels_unique
+
+
+
+column_annotation <- HeatmapAnnotation(
+  group = group_labels,
+  col = list(group = group_colors)
+)
+
+
+pdf("PMAdataset/Heatmap_PMAdataset_PMATNF_CAvsWT.pdf", width = 8, height = 8)
 Heatmap(ordered_data, 
         name = "Expression", 
         show_row_names = TRUE, 
@@ -377,7 +451,7 @@ gsva_res_reactome_merged$Sample_Group <- factor(gsva_res_reactome_merged$Sample_
                                                                    c("WT_PMATNF_UT", "WT_PMA_2H", "WT_PMA_2H_TNF_1H",
                                                                      "CA_PMATNF_UT", "CA_PMA_2H", "CA_PMA_2H_TNF_1H"))
 
-gsva_res_reactome_merged <- gsva_res_reactome_merged %>% arrange(Sample_Group)
+gsva_res_reactome_merged <- gsva_res_reactome_merged %>% arrange(Sample_Group) %>% dplyr::mutate(GeneSet = str_replace_all(GeneSet, ".ensembl_gene", ""))
 
 # Define group colors
 group_colors <- c("WT_PMATNF_UT" = "#FF5733",
@@ -392,15 +466,16 @@ median <- gsva_res_reactome_merged %>%
   group_by(Sample_Group, GeneSet) %>%
   summarize(median_GSVAscore = median(GSVAscore))
 
-pdf("PMAdataset/GSVAexample.pdf", width = 10, height = 4)
+pdf("PMAdataset/GSVAexample.pdf", width = 4, height = 8)
 ggplot(gsva_res_reactome_merged, aes(y = GSVAscore, x = Sample_Group, color = Sample_Group)) +
   geom_boxplot(outlier.shape = NA) +
   geom_jitter(width = 0.1) +
   scale_color_manual(values = group_colors) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
-        strip.text = element_text(size = 8)) +
-  facet_wrap(~GeneSet, ncol = 3, nrow=3)
+        strip.text = element_text(size = 4),
+        legend.position = "none") +
+  facet_wrap(~GeneSet, ncol = 1, nrow=2)
 dev.off()
 ```
 
@@ -466,3 +541,146 @@ for (g in unique(vsd_counts_melted_selectedgenes_annotated_subset$ensembl_gene_i
 dev.off()
 ```
 
+```{r}
+# PMATNF_CAvsWT_ranked<-PMATNF_CAvsWT_list$rank
+# names(PMATNF_CAvsWT_ranked)<-str_remove(PMATNF_CAvsWT_list$ensembl_gene_id_version, "\\..*$")
+
+PMATNF_CAvsWT_gsea <- subset(PMATNF_CAvsWT_list, padj <= 0.05)
+PMATNF_CAvsWT_ranked<-PMATNF_CAvsWT_gsea$log2FoldChange
+names(PMATNF_CAvsWT_ranked)<-str_remove(PMATNF_CAvsWT_gsea$ensembl_gene_id_version, "\\..*$")
+PMATNF_CAvsWT_ranked <- sort(PMATNF_CAvsWT_ranked, decreasing=TRUE)
+
+reac_enrich_PMATNF_CAvsWT_GSEAobject <- GSEA(PMATNF_CAvsWT_ranked, TERM2GENE = reactome_genesets, eps = 0, pvalueCutoff = 0.1, nPermSimple = 1e6)
+reac_enrich_PMATNF_CAvsWT_GSEAobject <- setReadable(reac_enrich_PMATNF_CAvsWT_GSEAobject, 'org.Hs.eg.db', 'ENSEMBL')
+reac_enrich_PMATNF_CAvsWT <- reac_enrich_PMATNF_CAvsWT_GSEAobject@result %>%
+  dplyr::mutate(signed_padj = sign(NES)*-log10(p.adjust)) %>%
+  dplyr::arrange(desc(signed_padj))
+```
+
+
+```{r}
+canonical_nfkb_genes <- subset(reactome_genesets, gs_name == "REACTOME_NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$ensembl_gene
+
+data_heatmap <- subset(vsdMat, str_remove(rownames(vsdMat), "\\..*$") %in% canonical_nfkb_genes)
+
+scaled_data = na.omit(t(scale(t(data_heatmap)))) 
+
+ordered_data <- as.data.frame(scaled_data[,coldata$Sample_ID])
+
+ordered_data$ensembl_gene_id_version <- rownames(ordered_data)
+
+ordered_data_temp <- merge(ordered_data, genemap, by="ensembl_gene_id_version")
+
+rownames(ordered_data_temp) <-ordered_data_temp$unique_gene_id
+
+ordered_data <- ordered_data_temp[,coldata$Sample_ID]
+
+group_labels <- factor(coldata$Sample_Group)
+group_labels_unique <- unique(group_labels)
+group_colors <- c("#FF5733", "#33FF57", "#337AFF", "#FF33E9", "#FFD700", "#800080")
+names(group_colors) <- group_labels_unique
+
+
+
+column_annotation <- HeatmapAnnotation(
+  group = group_labels,
+  col = list(group = group_colors)
+)
+
+
+pdf("PMAdataset/Heatmap_PMAdataset_CanonicalNFKB.pdf", width = 6, height = 2)
+Heatmap(ordered_data, 
+        name = "Expression", 
+        show_row_names = TRUE, 
+        show_column_names = TRUE,
+        cluster_columns = FALSE,
+        cluster_rows = TRUE,
+        row_names_gp = gpar(fontsize = 5),
+        top_annotation = column_annotation,
+        column_names_gp = gpar(fontsize = 4))
+dev.off()
+```
+
+```{r}
+tnfr2_noncanonical_nfkb_genes <- subset(reactome_genesets, gs_name == "REACTOME_TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$ensembl_gene
+
+data_heatmap <- subset(vsdMat, str_remove(rownames(vsdMat), "\\..*$") %in% tnfr2_noncanonical_nfkb_genes)
+
+scaled_data = na.omit(t(scale(t(data_heatmap)))) 
+
+ordered_data <- as.data.frame(scaled_data[,coldata$Sample_ID])
+
+ordered_data$ensembl_gene_id_version <- rownames(ordered_data)
+
+ordered_data_temp <- merge(ordered_data, genemap, by="ensembl_gene_id_version")
+
+rownames(ordered_data_temp) <-ordered_data_temp$unique_gene_id
+
+ordered_data <- ordered_data_temp[,coldata$Sample_ID]
+
+group_labels <- factor(coldata$Sample_Group)
+group_labels_unique <- unique(group_labels)
+group_colors <- c("#FF5733", "#33FF57", "#337AFF", "#FF33E9", "#FFD700", "#800080")
+names(group_colors) <- group_labels_unique
+
+
+
+column_annotation <- HeatmapAnnotation(
+  group = group_labels,
+  col = list(group = group_colors)
+)
+
+
+pdf("PMAdataset/Heatmap_PMAdataset_TNFR2noncanonicalNFKB.pdf", width = 6, height = 7)
+Heatmap(ordered_data, 
+        name = "Expression", 
+        show_row_names = TRUE, 
+        show_column_names = TRUE,
+        cluster_columns = FALSE,
+        cluster_rows = TRUE,
+        row_names_gp = gpar(fontsize = 5),
+        top_annotation = column_annotation,
+        column_names_gp = gpar(fontsize = 4))
+dev.off()
+```
+
+
+### VOLCANO PLOTS ###
+
+```{r}
+pdf(file="PMAdataset/Volcano_PMATNF_CAvsWT.pdf", width=6, height=6)
+ggplot(PMATNF_CAvsWT_list, aes(x=log2FoldChange, y=(minuslogp)))+
+  geom_point(size=2.25,color="grey", alpha=0.3)+
+  geom_point(data=subset(PMATNF_CAvsWT_list, log2FoldChange < -0.5 & minuslogp > 50), size=3,color="darkred", alpha=0.6)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
+  xlab("Log2FoldChange")+
+  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
+  ylab("-log10(p-adj)")+
+  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
+  geom_text_repel(data=subset(PMATNF_CAvsWT_list, log2FoldChange < -0.5 & minuslogp > 50), aes(label=unique_gene_id),
+                  size=4,
+                  color="black",
+                  nudge_y = 1,
+                  force=10,
+                  min.segment.length = 0,
+                  max.overlaps = Inf)+
+  scale_y_continuous(breaks = seq(0,250,by=25), limits = c(0,250))+
+  scale_x_continuous(breaks = seq(-3,3,by=1), limits = c(-3.2,3.2))
+dev.off()
+```
+
+### GSEA VISUALIZATIONS ###
+
+```{r}
+geneSetID_PMATNF_CAvsWT = match(unique(reactome_genesets_subset$gs_name), 
+                                reac_enrich_PMATNF_CAvsWT_GSEAobject@result[["ID"]])
+
+pdf("PMAdataset/GSEA/gseaplot2_PMATNF_CAvsWT.pdf", width=9, height=6)
+gseaplot2(reac_enrich_PMATNF_CAvsWT_GSEAobject, geneSetID = geneSetID_PMATNF_CAvsWT[!is.na(geneSetID_PMATNF_CAvsWT)], 
+          pvalue_table = FALSE, 
+          title="TNFR2 Non-Canonical NFKB Pathway Enrichment",
+          base_size = 16,
+          rel_heights = c(2,0.3,0.5))
+dev.off()
+```
