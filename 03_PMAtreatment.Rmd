@@ -22,6 +22,7 @@ library(openxlsx)
 library(stringr)
 library(biomaRt)
 library(msigdbr)
+library(coin)
 ```
 
 ```{r}
@@ -480,6 +481,206 @@ dev.off()
 ```
 
 ```{r}
+# Wilcoxon test for GSVA (NFKB Survival Pathway)
+wt_PMATNF_survival <- subset(gsva_res_reactome_merged, Sample_Group == "WT_PMA_2H_TNF_1H" & 
+                            GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
+wt_PMA_survival <- subset(gsva_res_reactome_merged, Sample_Group == "WT_PMA_2H" & 
+                            GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
+wt_UT_survival <- subset(gsva_res_reactome_merged, Sample_Group == "WT_PMATNF_UT" & 
+                            GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
+
+res_wt_PMATNF_survival <- wilcox.test(wt_PMATNF_survival, wt_UT_survival, correct = TRUE)
+res_wt_PMATNF_survival
+
+res_wt_PMATNF_vs_PMA_survival <- wilcox.test(wt_PMATNF_survival, wt_PMA_survival, correct = TRUE)
+res_wt_PMATNF_vs_PMA_survival
+
+res_wt_PMA_survival <- wilcox.test(wt_PMA_survival, wt_UT_survival, correct = TRUE)
+res_wt_PMA_survival
+
+ca_PMATNF_survival <- subset(gsva_res_reactome_merged, Sample_Group == "CA_PMA_2H_TNF_1H" & 
+                            GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
+ca_PMA_survival <- subset(gsva_res_reactome_merged, Sample_Group == "CA_PMA_2H" & 
+                            GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
+ca_UT_survival <- subset(gsva_res_reactome_merged, Sample_Group == "CA_PMATNF_UT" & 
+                            GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
+
+res_ca_PMATNF_survival <- wilcox.test(ca_PMATNF_survival, ca_UT_survival, correct = TRUE)
+res_ca_PMATNF_survival
+
+res_ca_PMATNF_vs_PMA_survival <- wilcox.test(ca_PMATNF_survival, ca_PMA_survival, correct = TRUE)
+res_ca_PMATNF_vs_PMA_survival
+
+res_ca_PMA_survival <- wilcox.test(ca_PMA_survival, ca_UT_survival, correct = TRUE)
+res_ca_PMA_survival
+```
+
+```{r}
+# Independence test for GSVA (NFKB Survival Pathway)
+wt_PMATNF_vs_PMA_survival <- subset(gsva_res_reactome_merged, Sample_Group %in% 
+                                      c("WT_PMA_2H_TNF_1H",  "WT_PMA_2H") &
+                                      GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")
+wt_PMATNF_vs_UT_survival <- subset(gsva_res_reactome_merged, Sample_Group %in% 
+                                      c("WT_PMA_2H_TNF_1H",  "WT_PMATNF_UT") &
+                                      GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")
+wt_PMA_vs_UT_survival <- subset(gsva_res_reactome_merged, Sample_Group %in% 
+                                      c("WT_PMA_2H",  "WT_PMATNF_UT") &
+                                      GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")
+
+res_wt_PMATNF_vs_PMA_survival <- independence_test(wt_PMATNF_vs_PMA_survival$GSVAscore ~
+                                                     factor(wt_PMATNF_vs_PMA_survival$Sample_Group, 
+                                                            levels = c("WT_PMA_2H_TNF_1H", "WT_PMA_2H")),
+                                                   distribution = "exact",
+                                                   alternative = "greater")
+res_wt_PMATNF_vs_PMA_survival
+
+res_wt_PMATNF_vs_UT_survival <- independence_test(wt_PMATNF_vs_UT_survival$GSVAscore ~
+                                                     factor(wt_PMATNF_vs_UT_survival$Sample_Group, 
+                                                            levels = c("WT_PMA_2H_TNF_1H", "WT_PMATNF_UT")),
+                                                   distribution = "exact",
+                                                   alternative = "greater")
+res_wt_PMATNF_vs_UT_survival
+
+res_wt_PMA_vs_UT_survival <- independence_test(wt_PMA_vs_UT_survival$GSVAscore ~
+                                                     factor(wt_PMA_vs_UT_survival$Sample_Group, 
+                                                            levels = c("WT_PMA_2H", "WT_PMATNF_UT")),
+                                                   distribution = "exact",
+                                                   alternative = "greater")
+res_wt_PMA_vs_UT_survival
+
+ca_PMATNF_vs_PMA_survival <- subset(gsva_res_reactome_merged, Sample_Group %in% 
+                                      c("CA_PMA_2H_TNF_1H",  "CA_PMA_2H") &
+                                      GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")
+ca_PMATNF_vs_UT_survival <- subset(gsva_res_reactome_merged, Sample_Group %in% 
+                                      c("CA_PMA_2H_TNF_1H",  "CA_PMATNF_UT") &
+                                      GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")
+ca_PMA_vs_UT_survival <- subset(gsva_res_reactome_merged, Sample_Group %in% 
+                                      c("CA_PMA_2H",  "CA_PMATNF_UT") &
+                                      GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")
+
+res_ca_PMATNF_vs_PMA_survival <- independence_test(ca_PMATNF_vs_PMA_survival$GSVAscore ~
+                                                     factor(ca_PMATNF_vs_PMA_survival$Sample_Group, 
+                                                            levels = c("CA_PMA_2H_TNF_1H", "CA_PMA_2H")),
+                                                   distribution = "exact",
+                                                   alternative = "greater")
+res_ca_PMATNF_vs_PMA_survival
+
+res_ca_PMATNF_vs_UT_survival <- independence_test(ca_PMATNF_vs_UT_survival$GSVAscore ~
+                                                     factor(ca_PMATNF_vs_UT_survival$Sample_Group, 
+                                                            levels = c("CA_PMA_2H_TNF_1H", "CA_PMATNF_UT")),
+                                                   distribution = "exact",
+                                                   alternative = "greater")
+res_ca_PMATNF_vs_UT_survival
+
+res_ca_PMA_vs_UT_survival <- independence_test(ca_PMA_vs_UT_survival$GSVAscore ~
+                                                     factor(ca_PMA_vs_UT_survival$Sample_Group, 
+                                                            levels = c("CA_PMA_2H", "CA_PMATNF_UT")),
+                                                   distribution = "exact",
+                                                   alternative = "greater")
+res_ca_PMA_vs_UT_survival
+```
+
+```{r}
+# Wilcoxon test for TNFR2_NON_CANONICAL_NF_KB_PATHWAY
+wt_PMATNF_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "WT_PMA_2H_TNF_1H" & 
+                            GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
+wt_PMA_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "WT_PMA_2H" & 
+                            GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
+wt_UT_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "WT_PMATNF_UT" & 
+                            GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
+
+res_wt_PMATNF_noncanonical <- wilcox.test(wt_PMATNF_noncanonical, wt_UT_noncanonical, alternative = "greater", correct = T)
+res_wt_PMATNF_noncanonical
+
+res_wt_PMATNF_vs_PMA_noncanonical <- wilcox.test(wt_PMATNF_noncanonical, wt_PMA_noncanonical, alternative = "greater", correct = T)
+res_wt_PMATNF_vs_PMA_noncanonical
+
+res_wt_PMA_noncanonical <- wilcox.test(wt_PMA_noncanonical, wt_UT_noncanonical, alternative = "greater", correct = T)
+res_wt_PMA_noncanonical
+
+ca_PMATNF_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "CA_PMA_2H_TNF_1H" & 
+                            GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
+ca_PMA_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "CA_PMA_2H" & 
+                            GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
+ca_UT_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "CA_PMATNF_UT" & 
+                            GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
+
+res_ca_PMATNF_noncanonical <- wilcox.test(ca_PMATNF_noncanonical, ca_UT_noncanonical, alternative = "greater", correct = T)
+res_ca_PMATNF_noncanonical
+
+res_ca_PMATNF_vs_PMA_noncanonical <- wilcox.test(ca_PMATNF_survival, ca_PMA_noncanonical, alternative = "greater", correct = T)
+res_ca_PMATNF_vs_PMA_noncanonical
+
+res_ca_PMA_noncanonical <- wilcox.test(ca_PMA_noncanonical, ca_UT_noncanonical, alternative = "greater", correct = T)
+res_ca_PMA_noncanonical
+```
+
+```{r}
+# Independence test for TNFR2_NON_CANONICAL_NF_KB_PATHWAY
+wt_PMATNF_vs_PMA_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group %in% 
+                                      c("WT_PMA_2H_TNF_1H",  "WT_PMA_2H") &
+                                      GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")
+wt_PMATNF_vs_UT_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group %in% 
+                                      c("WT_PMA_2H_TNF_1H",  "WT_PMATNF_UT") &
+                                      GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")
+wt_PMA_vs_UT_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group %in% 
+                                      c("WT_PMA_2H",  "WT_PMATNF_UT") &
+                                      GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")
+
+res_wt_PMATNF_vs_PMA_noncanonical <- independence_test(wt_PMATNF_vs_PMA_noncanonical$GSVAscore ~
+                                                     factor(wt_PMATNF_vs_PMA_noncanonical$Sample_Group, 
+                                                            levels = c("WT_PMA_2H_TNF_1H", "WT_PMA_2H")),
+                                                   distribution = "exact",
+                                                   alternative = "greater")
+res_wt_PMATNF_vs_PMA_noncanonical
+
+res_wt_PMATNF_vs_UT_noncanonical <- independence_test(wt_PMATNF_vs_UT_noncanonical$GSVAscore ~
+                                                     factor(wt_PMATNF_vs_UT_noncanonical$Sample_Group, 
+                                                            levels = c("WT_PMA_2H_TNF_1H", "WT_PMATNF_UT")),
+                                                   distribution = "exact",
+                                                   alternative = "greater")
+res_wt_PMATNF_vs_UT_noncanonical
+
+res_wt_PMA_vs_UT_noncanonical <- independence_test(wt_PMA_vs_UT_noncanonical$GSVAscore ~
+                                                     factor(wt_PMA_vs_UT_noncanonical$Sample_Group, 
+                                                            levels = c("WT_PMA_2H", "WT_PMATNF_UT")),
+                                                   distribution = "exact",
+                                                   alternative = "greater")
+res_wt_PMA_vs_UT_noncanonical
+
+ca_PMATNF_vs_PMA_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group %in% 
+                                      c("CA_PMA_2H_TNF_1H",  "CA_PMA_2H") &
+                                      GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")
+ca_PMATNF_vs_UT_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group %in% 
+                                      c("CA_PMA_2H_TNF_1H",  "CA_PMATNF_UT") &
+                                      GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")
+ca_PMA_vs_UT_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group %in% 
+                                      c("CA_PMA_2H",  "CA_PMATNF_UT") &
+                                      GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")
+
+res_ca_PMATNF_vs_PMA_noncanonical <- independence_test(ca_PMATNF_vs_PMA_noncanonical$GSVAscore ~
+                                                     factor(ca_PMATNF_vs_PMA_noncanonical$Sample_Group, 
+                                                            levels = c("CA_PMA_2H_TNF_1H", "CA_PMA_2H")),
+                                                   distribution = "exact",
+                                                   alternative = "greater")
+res_ca_PMATNF_vs_PMA_noncanonical
+
+res_ca_PMATNF_vs_UT_noncanonical <- independence_test(ca_PMATNF_vs_UT_noncanonical$GSVAscore ~
+                                                     factor(ca_PMATNF_vs_UT_noncanonical$Sample_Group, 
+                                                            levels = c("CA_PMA_2H_TNF_1H", "CA_PMATNF_UT")),
+                                                   distribution = "exact",
+                                                   alternative = "greater")
+res_ca_PMATNF_vs_UT_noncanonical
+
+res_ca_PMA_vs_UT_noncanonical <- independence_test(ca_PMA_vs_UT_noncanonical$GSVAscore ~
+                                                     factor(ca_PMA_vs_UT_noncanonical$Sample_Group, 
+                                                            levels = c("CA_PMA_2H", "CA_PMATNF_UT")),
+                                                   distribution = "exact",
+                                                   alternative = "greater")
+res_ca_PMA_vs_UT_noncanonical
+```
+
+```{r}
 vsd_counts_melted_selectedgenes <- subset(vsdmelted, ensembl_gene_id_version %in% selected_genes)
 
 vsd_counts_melted_selectedgenes_annotated <- merge(vsd_counts_melted_selectedgenes, coldata, by="Sample_ID") 
@@ -542,15 +743,11 @@ dev.off()
 ```
 
 ```{r}
-# PMATNF_CAvsWT_ranked<-PMATNF_CAvsWT_list$rank
-# names(PMATNF_CAvsWT_ranked)<-str_remove(PMATNF_CAvsWT_list$ensembl_gene_id_version, "\\..*$")
+PMATNF_CAvsWT_ranked<-PMATNF_CAvsWT_list$rank
+names(PMATNF_CAvsWT_ranked)<-str_remove(PMATNF_CAvsWT_list$ensembl_gene_id_version, "\\..*$")
 
-PMATNF_CAvsWT_gsea <- subset(PMATNF_CAvsWT_list, padj <= 0.05)
-PMATNF_CAvsWT_ranked<-PMATNF_CAvsWT_gsea$log2FoldChange
-names(PMATNF_CAvsWT_ranked)<-str_remove(PMATNF_CAvsWT_gsea$ensembl_gene_id_version, "\\..*$")
-PMATNF_CAvsWT_ranked <- sort(PMATNF_CAvsWT_ranked, decreasing=TRUE)
 
-reac_enrich_PMATNF_CAvsWT_GSEAobject <- GSEA(PMATNF_CAvsWT_ranked, TERM2GENE = reactome_genesets, eps = 0, pvalueCutoff = 0.1, nPermSimple = 1e6)
+reac_enrich_PMATNF_CAvsWT_GSEAobject <- GSEA(PMATNF_CAvsWT_ranked, TERM2GENE = reactome_genesets, eps = 0, pvalueCutoff = 0.1, nPermSimple = 1e4)
 reac_enrich_PMATNF_CAvsWT_GSEAobject <- setReadable(reac_enrich_PMATNF_CAvsWT_GSEAobject, 'org.Hs.eg.db', 'ENSEMBL')
 reac_enrich_PMATNF_CAvsWT <- reac_enrich_PMATNF_CAvsWT_GSEAobject@result %>%
   dplyr::mutate(signed_padj = sign(NES)*-log10(p.adjust)) %>%

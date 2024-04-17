@@ -353,7 +353,7 @@ names(wt_TNFvsUT_ranked)<-str_remove(wt_TNFvsUT_list$ensembl_gene_id_version, "\
 reac_enrich_wt_TNFvsUT_GSEAobject <- GSEA(wt_TNFvsUT_ranked, 
                                           TERM2GENE = reactome_genesets, 
                                           eps = 0, 
-                                          pvalueCutoff = 0.2, 
+                                          pvalueCutoff = 0.25, 
                                           nPermSimple = 1e4)
 reac_enrich_wt_TNFvsUT_GSEAobject <- setReadable(reac_enrich_wt_TNFvsUT_GSEAobject, 'org.Hs.eg.db', 'ENSEMBL')
 reac_enrich_wt_TNFvsUT <- reac_enrich_wt_TNFvsUT_GSEAobject@result %>%
@@ -363,12 +363,15 @@ reac_enrich_wt_TNFvsUT <- reac_enrich_wt_TNFvsUT_GSEAobject@result %>%
 tft_enrich_wt_TNFvsUT_GSEAobject <- GSEA(wt_TNFvsUT_ranked, 
                                          TERM2GENE = tft_genesets, 
                                          eps = 0, 
-                                         pvalueCutoff = 0.2, 
+                                         pvalueCutoff = 0.25, 
                                          nPermSimple = 1e4)
 tft_enrich_wt_TNFvsUT_GSEAobject <- setReadable(tft_enrich_wt_TNFvsUT_GSEAobject, 'org.Hs.eg.db', 'ENSEMBL')
 tft_enrich_wt_TNFvsUT <- tft_enrich_wt_TNFvsUT_GSEAobject@result %>%
   dplyr::mutate(signed_padj = sign(NES)*-log10(p.adjust)) %>%
   dplyr::arrange(desc(signed_padj))
+
+#saveRDS(reac_enrich_wt_TNFvsUT_GSEAobject, "TNFdataset/GSEA/reac_enrich_wt_TNFvsUT_GSEAobject.RDS")
+#saveRDS(tft_enrich_wt_TNFvsUT_GSEAobject, "TNFdataset/GSEA/tft_enrich_wt_TNFvsUT_GSEAobject.RDS")
 ```
 
 ```{r}
@@ -376,9 +379,9 @@ ea_TNFvsUT_ranked<-ea_TNFvsUT_list$rank
 names(ea_TNFvsUT_ranked)<-str_remove(ea_TNFvsUT_list$ensembl_gene_id_version, "\\..*$")
 
 reac_enrich_ea_TNFvsUT_GSEAobject <- GSEA(ea_TNFvsUT_ranked,
-                                          TERM2GENE = reactome_genesets_subset, 
+                                          TERM2GENE = reactome_genesets, 
                                           eps = 0, 
-                                          pvalueCutoff = 0.2, 
+                                          pvalueCutoff = 0.25, 
                                           nPermSimple = 1e4)
 reac_enrich_ea_TNFvsUT_GSEAobject <- setReadable(reac_enrich_ea_TNFvsUT_GSEAobject, 'org.Hs.eg.db', 'ENSEMBL')
 reac_enrich_ea_TNFvsUT <- reac_enrich_ea_TNFvsUT_GSEAobject@result %>%
@@ -386,14 +389,17 @@ reac_enrich_ea_TNFvsUT <- reac_enrich_ea_TNFvsUT_GSEAobject@result %>%
   dplyr::arrange(desc(signed_padj))
 
 tft_enrich_ea_TNFvsUT_GSEAobject <- GSEA(ea_TNFvsUT_ranked, 
-                                         TERM2GENE = tft_genesets_subset, 
+                                         TERM2GENE = tft_genesets, 
                                          eps = 0, 
-                                         pvalueCutoff = 0.2, 
+                                         pvalueCutoff = 0.25, 
                                          nPermSimple = 1e4)
 tft_enrich_ea_TNFvsUT_GSEAobject <- setReadable(tft_enrich_ea_TNFvsUT_GSEAobject, 'org.Hs.eg.db', 'ENSEMBL')
 tft_enrich_ea_TNFvsUT <- tft_enrich_ea_TNFvsUT_GSEAobject@result %>%
   dplyr::mutate(signed_padj = sign(NES)*-log10(p.adjust)) %>%
   dplyr::arrange(desc(signed_padj))
+
+#saveRDS(reac_enrich_ea_TNFvsUT_GSEAobject, "TNFdataset/GSEA/reac_enrich_ea_TNFvsUT_GSEAobject.RDS")
+#saveRDS(tft_enrich_ea_TNFvsUT_GSEAobject, "TNFdataset/GSEA/tft_enrich_ea_TNFvsUT_GSEAobject.RDS")
 ```
 
 ```{r}
@@ -401,9 +407,9 @@ caea_TNFvsUT_ranked<-caea_TNFvsUT_list$rank
 names(caea_TNFvsUT_ranked)<-str_remove(caea_TNFvsUT_list$ensembl_gene_id_version, "\\..*$")
 
 reac_enrich_caea_TNFvsUT_GSEAobject <- GSEA(caea_TNFvsUT_ranked, 
-                                            TERM2GENE = reactome_genesets_subset, 
+                                            TERM2GENE = reactome_genesets, 
                                             eps = 0, 
-                                            pvalueCutoff = 0.2, 
+                                            pvalueCutoff = 0.25, 
                                             nPermSimple = 1e4)
 reac_enrich_caea_TNFvsUT_GSEAobject <- setReadable(reac_enrich_caea_TNFvsUT_GSEAobject, 'org.Hs.eg.db', 'ENSEMBL')
 reac_enrich_caea_TNFvsUT <- reac_enrich_caea_TNFvsUT_GSEAobject@result %>%
@@ -411,14 +417,17 @@ reac_enrich_caea_TNFvsUT <- reac_enrich_caea_TNFvsUT_GSEAobject@result %>%
   dplyr::arrange(desc(signed_padj))
 
 tft_enrich_caea_TNFvsUT_GSEAobject <- GSEA(caea_TNFvsUT_ranked, 
-                                           TERM2GENE = tft_genesets_subset, 
+                                           TERM2GENE = tft_genesets, 
                                            eps = 0, 
-                                           pvalueCutoff = 0.2, 
+                                           pvalueCutoff = 0.25, 
                                            nPermSimple = 1e4)
 tft_enrich_caea_TNFvsUT_GSEAobject <- setReadable(tft_enrich_caea_TNFvsUT_GSEAobject, 'org.Hs.eg.db', 'ENSEMBL')
 tft_enrich_caea_TNFvsUT <- tft_enrich_caea_TNFvsUT_GSEAobject@result %>%
   dplyr::mutate(signed_padj = sign(NES)*-log10(p.adjust)) %>%
   dplyr::arrange(desc(signed_padj))
+
+#saveRDS(reac_enrich_caea_TNFvsUT_GSEAobject, "TNFdataset/GSEA/reac_enrich_caea_TNFvsUT_GSEAobject.RDS")
+#saveRDS(tft_enrich_caea_TNFvsUT_GSEAobject, "TNFdataset/GSEA/tft_enrich_caea_TNFvsUT_GSEAobject.RDS")
 ```
 
 ```{r}
@@ -471,6 +480,126 @@ ggplot(gsva_res_reactome_merged, aes(y = GSVAscore, x = Sample_Group, color = Sa
         legend.position = "none") +
   facet_wrap(~GeneSet, ncol = 1, nrow=2)
 dev.off()
+```
+
+```{r}
+# Wilcoxon test for GSVA (NFKB Survival Pathway)
+wt_TNF_survival <- subset(gsva_res_reactome_merged, Sample_Group == "WT_TNF_1H" & 
+                            GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
+wt_UT_survival <- subset(gsva_res_reactome_merged, Sample_Group == "WT_TNF_UT" & 
+                            GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
+
+res_wt_survival <- wilcox.test(wt_TNF_survival, wt_UT_survival, correct = TRUE)
+res_wt_survival
+
+ea_TNF_survival <- subset(gsva_res_reactome_merged, Sample_Group == "EA_TNF_1H" & 
+                            GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
+ea_UT_survival <- subset(gsva_res_reactome_merged, Sample_Group == "EA_TNF_UT" & 
+                            GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
+
+res_ea_survival <- wilcox.test(ea_TNF_survival, ea_UT_survival, correct = TRUE)
+res_ea_survival
+
+caea_TNF_survival <- subset(gsva_res_reactome_merged, Sample_Group == "CAEA_TNF_1H" & 
+                            GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
+caea_UT_survival <- subset(gsva_res_reactome_merged, Sample_Group == "CAEA_TNF_UT" & 
+                            GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
+
+res_caea_survival <- wilcox.test(caea_TNF_survival, caea_UT_survival, correct = TRUE)
+res_caea_survival
+```
+```{r}
+# Independence test for GSVA (NFKB Survival Pathway)
+wt_TNF_survival <- subset(gsva_res_reactome_merged, Sample_Group %in% 
+                                      c("WT_TNF_1H",  "WT_TNF_UT") &
+                                      GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")
+ea_TNF_survival <- subset(gsva_res_reactome_merged, Sample_Group %in% 
+                                      c("EA_TNF_1H",  "EA_TNF_UT") &
+                                      GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")
+caea_TNF_survival <- subset(gsva_res_reactome_merged, Sample_Group %in% 
+                                      c("CAEA_TNF_1H",  "CAEA_TNF_UT") &
+                                      GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")
+
+res_wt_TNF_survival <- independence_test(wt_TNF_survival$GSVAscore ~
+                                                     factor(wt_TNF_survival$Sample_Group, 
+                                                            levels = c("WT_TNF_1H", "WT_TNF_UT")),
+                                                   distribution = "exact",
+                                                   alternative = "greater")
+res_wt_TNF_survival
+
+res_ea_TNF_survival <- independence_test(ea_TNF_survival$GSVAscore ~
+                                                     factor(ea_TNF_survival$Sample_Group, 
+                                                            levels = c("EA_TNF_1H", "EA_TNF_UT")),
+                                                   distribution = "exact",
+                                                   alternative = "greater")
+res_ea_TNF_survival
+
+res_caea_TNF_survival <- independence_test(caea_TNF_survival$GSVAscore ~
+                                                     factor(caea_TNF_survival$Sample_Group, 
+                                                            levels = c("CAEA_TNF_1H", "CAEA_TNF_UT")),
+                                                   distribution = "exact",
+                                                   alternative = "greater")
+res_caea_TNF_survival
+```
+
+```{r}
+# Wilcoxon test for GSVA (TNFR2 Non Canonical NFKB Pathway)
+wt_TNF_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "WT_TNF_1H" & 
+                            GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
+wt_UT_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "WT_TNF_UT" & 
+                            GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
+
+res_wt_noncanonical <- wilcox.test(wt_TNF_noncanonical, wt_UT_noncanonical, correct = TRUE)
+res_wt_noncanonical
+
+ea_TNF_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "EA_TNF_1H" & 
+                            GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
+ea_UT_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "EA_TNF_UT" & 
+                            GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
+
+res_ea_noncanonical <- wilcox.test(ea_TNF_noncanonical, ea_UT_noncanonical, correct = TRUE)
+res_ea_noncanonical
+
+caea_TNF_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "CAEA_TNF_1H" & 
+                            GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
+caea_UT_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "CAEA_TNF_UT" & 
+                            GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
+
+res_caea_noncanonical <- wilcox.test(caea_TNF_noncanonical, caea_UT_noncanonical, correct = TRUE)
+res_caea_noncanonical
+```
+```{r}
+# Independence test for GSVA TNFR2_NON_CANONICAL_NF_KB_PATHWAY
+wt_TNF_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group %in% 
+                                      c("WT_TNF_1H",  "WT_TNF_UT") &
+                                      GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")
+ea_TNF_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group %in% 
+                                      c("EA_TNF_1H",  "EA_TNF_UT") &
+                                      GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")
+caea_TNF_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group %in% 
+                                      c("CAEA_TNF_1H",  "CAEA_TNF_UT") &
+                                      GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")
+
+res_wt_TNF_noncanonical <- independence_test(wt_TNF_noncanonical$GSVAscore ~
+                                                     factor(wt_TNF_noncanonical$Sample_Group, 
+                                                            levels = c("WT_TNF_1H", "WT_TNF_UT")),
+                                                   distribution = "exact",
+                                                   alternative = "greater")
+res_wt_TNF_noncanonical
+
+res_ea_TNF_noncanonical <- independence_test(ea_TNF_noncanonical$GSVAscore ~
+                                                     factor(ea_TNF_noncanonical$Sample_Group, 
+                                                            levels = c("EA_TNF_1H", "EA_TNF_UT")),
+                                                   distribution = "exact",
+                                                   alternative = "greater")
+res_ea_TNF_noncanonical
+
+res_caea_TNF_noncanonical <- independence_test(caea_TNF_noncanonical$GSVAscore ~
+                                                     factor(caea_TNF_noncanonical$Sample_Group, 
+                                                            levels = c("CAEA_TNF_1H", "CAEA_TNF_UT")),
+                                                   distribution = "exact",
+                                                   alternative = "greater")
+res_caea_TNF_noncanonical
 ```
 
 ```{r}
