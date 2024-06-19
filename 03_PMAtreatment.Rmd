@@ -23,6 +23,7 @@ library(stringr)
 library(biomaRt)
 library(msigdbr)
 library(coin)
+library(circlize)
 ```
 
 ```{r}
@@ -78,7 +79,21 @@ coldata <- coldata %>%
   dplyr::arrange(desc(Sample_Group)) %>%
   dplyr::group_by(Sample_Group) %>%
   dplyr::arrange(Sample_ID) %>%
-  dplyr::ungroup()
+  dplyr::ungroup() %>%
+  dplyr::mutate(
+    Genotype =
+    case_when(Sample_Group %in% c("WT_PMATNF_UT", "WT_PMA_2H", "WT_PMA_2H_TNF_1H") ~ "WT",
+              Sample_Group %in% c("CA_PMATNF_UT", "CA_PMA_2H", "CA_PMA_2H_TNF_1H") ~ "CA",
+              TRUE ~ "other"),
+    Treatment =
+    case_when(Sample_Group %in% c("WT_PMATNF_UT", "CA_PMATNF_UT") ~ "UT",
+              Sample_Group %in% c("WT_PMA_2H", "CA_PMA_2H") ~ "PMA",
+              Sample_Group %in% c("WT_PMA_2H_TNF_1H", "CA_PMA_2H_TNF_1H") ~ "PMATNF",
+              TRUE ~ "other"))
+
+rownames(coldata) <- coldata$Sample_ID
+
+cnt <- dplyr::select(cnt, coldata$Sample_ID)
 
 # Convert Sample_Group to a factor and specify the level order
 coldata$Sample_Group <- factor(coldata$Sample_Group, levels = desired_order)
@@ -99,10 +114,19 @@ all(rownames(coldata) == colnames(cnt))
 ```
 
 ```{r}
+#Add the batch information as a confounder in the design parameter. This will account for the batch effect while calculating the differential expression analysis stats but won't normalize/transform the counts for the batch effect. We will do this later below.
 dds <- DESeqDataSetFromMatrix(countData = cnt,
-                              colData = coldata,
-                              design = ~Batch+Sample_Group)
-dds<- DESeq(dds)
+                                   colData = coldata,
+                                   design = ~Batch+Treatment+Genotype+Genotype:Treatment)
+dds_direct <- DESeqDataSetFromMatrix(countData = cnt,
+                                   colData = coldata,
+                                   design = ~Batch+Sample_Group)
+
+dds$Genotype<-relevel(dds$Genotype,ref="WT")
+dds$Treatment<-relevel(dds$Treatment,ref="UT")
+
+dds <- DESeq(dds, test = "Wald")
+dds_direct <- DESeq(dds_direct, test = "Wald")
 ```
 
 ```{r}
@@ -180,11 +204,13 @@ ggplot(pcaData, aes(PC1, PC2, color=Batch)) +
 dev.off()
 ```
 
-```{r}
-res_wt_PMAvsUT <- DESeq2::results(dds, contrast=c("Sample_Group","WT_PMA_2H","WT_PMATNF_UT"), alpha = 0.05)
-summary(res_wt_PMAvsUT)
+### PMA Treatment Main Effect
 
-wt_PMAvsUT_list<-data.frame(gene = rownames(res_wt_PMAvsUT), res_wt_PMAvsUT, stringsAsFactors = F) %>% 
+```{r}
+res_PMAvsUT <- DESeq2::results(dds, contrast=c("Treatment","PMA","UT"), alpha = 0.05)
+summary(res_PMAvsUT)
+
+PMAvsUT_list<-data.frame(gene = rownames(res_PMAvsUT), res_PMAvsUT, stringsAsFactors = F) %>% 
   na.omit() %>% 
   dplyr::select("log2FoldChange", "padj") %>% 
   tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
@@ -195,26 +221,27 @@ wt_PMAvsUT_list<-data.frame(gene = rownames(res_wt_PMAvsUT), res_wt_PMAvsUT, str
   merge(genemap, by="ensembl_gene_id_version") %>%
   dplyr::arrange(desc(signed_padj)) 
 
-wt_PMAvsUT_pos <- subset(wt_PMAvsUT_list, signed_padj > 0) %>%
+PMAvsUT_pos <- subset(PMAvsUT_list, signed_padj > 0) %>%
   arrange(signed_padj, abs(log2FoldChange)) %>%
   mutate(rank = row_number()) %>%
   arrange(desc(rank))
 
-wt_PMAvsUT_neg <- subset(wt_PMAvsUT_list, signed_padj < 0) %>%
+PMAvsUT_neg <- subset(PMAvsUT_list, signed_padj < 0) %>%
   arrange(desc(signed_padj), abs(log2FoldChange)) %>%
   mutate(rank = -row_number()) %>%
   arrange(desc(rank))
 
-wt_PMAvsUT_list <- bind_rows(wt_PMAvsUT_pos, wt_PMAvsUT_neg) %>% dplyr::arrange(desc(rank))
+PMAvsUT_list <- bind_rows(PMAvsUT_pos, PMAvsUT_neg) %>% dplyr::arrange(desc(rank))
 
-write.xlsx(wt_PMAvsUT_list, "PMAdataset/wt_PMAvsUT.xlsx")
+write.xlsx(PMAvsUT_list, "PMAdataset/PMAvsUT.xlsx")
 ```
+### PMA+TNF Treatment Main Effect
 
 ```{r}
-res_wt_PMATNFvsPMA <- DESeq2::results(dds, contrast=c("Sample_Group","WT_PMA_2H_TNF_1H","WT_PMA_2H"), alpha = 0.05)
-summary(res_wt_PMATNFvsPMA)
+res_PMATNFvsUT <- DESeq2::results(dds, contrast=c("Treatment","PMATNF","UT"), alpha = 0.05)
+summary(res_PMATNFvsUT)
 
-wt_PMATNFvsPMA_list<-data.frame(gene = rownames(res_wt_PMATNFvsPMA), res_wt_PMATNFvsPMA, stringsAsFactors = F) %>% 
+PMATNFvsUT_list<-data.frame(gene = rownames(res_PMATNFvsUT), res_PMATNFvsUT, stringsAsFactors = F) %>% 
   na.omit() %>% 
   dplyr::select("log2FoldChange", "padj") %>% 
   tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
@@ -225,26 +252,27 @@ wt_PMATNFvsPMA_list<-data.frame(gene = rownames(res_wt_PMATNFvsPMA), res_wt_PMAT
   merge(genemap, by="ensembl_gene_id_version") %>%
   dplyr::arrange(desc(signed_padj)) 
 
-wt_PMATNFvsPMA_pos <- subset(wt_PMATNFvsPMA_list, signed_padj > 0) %>%
+PMATNFvsUT_pos <- subset(PMATNFvsUT_list, signed_padj > 0) %>%
   arrange(signed_padj, abs(log2FoldChange)) %>%
   mutate(rank = row_number()) %>%
   arrange(desc(rank))
 
-wt_PMATNFvsPMA_neg <- subset(wt_PMATNFvsPMA_list, signed_padj < 0) %>%
+PMATNFvsUT_neg <- subset(PMATNFvsUT_list, signed_padj < 0) %>%
   arrange(desc(signed_padj), abs(log2FoldChange)) %>%
   mutate(rank = -row_number()) %>%
   arrange(desc(rank))
 
-wt_PMATNFvsPMA_list <- bind_rows(wt_PMATNFvsPMA_pos, wt_PMATNFvsPMA_neg) %>% dplyr::arrange(desc(rank))
+PMATNFvsUT_list <- bind_rows(PMATNFvsUT_pos, PMATNFvsUT_neg) %>% dplyr::arrange(desc(rank))
 
-write.xlsx(wt_PMATNFvsPMA_list, "PMAdataset/wt_PMATNFvsPMA.xlsx")
+write.xlsx(PMATNFvsUT_list, "PMAdataset/PMATNFvsUT.xlsx")
 ```
+### PMA+TNF VS PMA Treatment Effect
 
 ```{r}
-res_ca_PMAvsUT <- DESeq2::results(dds, contrast=c("Sample_Group","CA_PMA_2H","CA_PMATNF_UT"), alpha = 0.05)
-summary(res_ca_PMAvsUT)
+res_PMATNFvsPMA <- DESeq2::results(dds, contrast=c("Treatment","PMATNF","PMA"), alpha = 0.05)
+summary(res_PMATNFvsPMA)
 
-ca_PMAvsUT_list<-data.frame(gene = rownames(res_ca_PMAvsUT), res_ca_PMAvsUT, stringsAsFactors = F) %>% 
+PMATNFvsPMA_list<-data.frame(gene = rownames(res_PMATNFvsPMA), res_PMATNFvsPMA, stringsAsFactors = F) %>% 
   na.omit() %>% 
   dplyr::select("log2FoldChange", "padj") %>% 
   tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
@@ -255,26 +283,27 @@ ca_PMAvsUT_list<-data.frame(gene = rownames(res_ca_PMAvsUT), res_ca_PMAvsUT, str
   merge(genemap, by="ensembl_gene_id_version") %>%
   dplyr::arrange(desc(signed_padj)) 
 
-ca_PMAvsUT_pos <- subset(ca_PMAvsUT_list, signed_padj > 0) %>%
+PMATNFvsPMA_pos <- subset(PMATNFvsPMA_list, signed_padj > 0) %>%
   arrange(signed_padj, abs(log2FoldChange)) %>%
   mutate(rank = row_number()) %>%
   arrange(desc(rank))
 
-ca_PMAvsUT_neg <- subset(ca_PMAvsUT_list, signed_padj < 0) %>%
+PMATNFvsPMA_neg <- subset(PMATNFvsPMA_list, signed_padj < 0) %>%
   arrange(desc(signed_padj), abs(log2FoldChange)) %>%
   mutate(rank = -row_number()) %>%
   arrange(desc(rank))
 
-ca_PMAvsUT_list <- bind_rows(ca_PMAvsUT_pos, ca_PMAvsUT_neg) %>% dplyr::arrange(desc(rank))
+PMATNFvsPMA_list <- bind_rows(PMATNFvsPMA_pos, PMATNFvsPMA_neg) %>% dplyr::arrange(desc(rank))
 
-write.xlsx(ca_PMAvsUT_list, "PMAdataset/ca_PMAvsUT.xlsx")
+write.xlsx(PMATNFvsPMA_list, "PMAdataset/PMATNFvsPMA.xlsx")
 ```
+### CA Mutation Main Effect
 
 ```{r}
-res_ca_PMATNFvsPMA <- DESeq2::results(dds, contrast=c("Sample_Group","CA_PMA_2H_TNF_1H","CA_PMA_2H"), alpha = 0.05)
-summary(res_ca_PMATNFvsPMA)
+res_CAvsWT <- DESeq2::results(dds, contrast=c("Genotype","CA","WT"), alpha = 0.05)
+summary(res_CAvsWT)
 
-ca_PMATNFvsPMA_list<-data.frame(gene = rownames(res_ca_PMATNFvsPMA), res_ca_PMATNFvsPMA, stringsAsFactors = F) %>% 
+CAvsWT_list<-data.frame(gene = rownames(res_CAvsWT), res_CAvsWT, stringsAsFactors = F) %>% 
   na.omit() %>% 
   dplyr::select("log2FoldChange", "padj") %>% 
   tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
@@ -285,60 +314,95 @@ ca_PMATNFvsPMA_list<-data.frame(gene = rownames(res_ca_PMATNFvsPMA), res_ca_PMAT
   merge(genemap, by="ensembl_gene_id_version") %>%
   dplyr::arrange(desc(signed_padj)) 
 
-ca_PMATNFvsPMA_pos <- subset(ca_PMATNFvsPMA_list, signed_padj > 0) %>%
+CAvsWT_pos <- subset(CAvsWT_list, signed_padj > 0) %>%
   arrange(signed_padj, abs(log2FoldChange)) %>%
   mutate(rank = row_number()) %>%
   arrange(desc(rank))
 
-ca_PMATNFvsPMA_neg <- subset(ca_PMATNFvsPMA_list, signed_padj < 0) %>%
+CAvsWT_neg <- subset(CAvsWT_list, signed_padj < 0) %>%
   arrange(desc(signed_padj), abs(log2FoldChange)) %>%
   mutate(rank = -row_number()) %>%
   arrange(desc(rank))
 
-ca_PMATNFvsPMA_list <- bind_rows(ca_PMATNFvsPMA_pos, ca_PMATNFvsPMA_neg) %>% dplyr::arrange(desc(rank))
-write.xlsx(ca_PMATNFvsPMA_list, "PMAdataset/ca_PMATNFvsPMA.xlsx")
-```
-```{r}
-res_PMATNF_CAvsWT <- DESeq2::results(dds, contrast=c("Sample_Group","CA_PMA_2H_TNF_1H","WT_PMA_2H_TNF_1H"), alpha = 0.05)
-summary(res_PMATNF_CAvsWT)
+CAvsWT_list <- bind_rows(CAvsWT_pos, CAvsWT_neg) %>% dplyr::arrange(desc(rank))
 
-PMATNF_CAvsWT_list<-data.frame(gene = rownames(res_PMATNF_CAvsWT), res_PMATNF_CAvsWT, stringsAsFactors = F) %>% 
+CAvsWT_list_sig <- subset(CAvsWT_list, padj <= 0.001)
+
+write.xlsx(CAvsWT_list, "PMAdataset/CAvsWT.xlsx")
+```
+### CA Mutation - PMA Treatment Interaction Effect
+
+```{r}
+res_CAPMAtreatment <- DESeq2::results(dds, name = "TreatmentPMA.GenotypeCA", alpha = 0.05)
+summary(res_CAPMAtreatment)
+
+CAPMAtreatment_list<-data.frame(gene = rownames(res_CAPMAtreatment), res_CAPMAtreatment, stringsAsFactors = F) %>% 
   na.omit() %>% 
-  dplyr::select("log2FoldChange", "padj") %>% 
+  dplyr::select("log2FoldChange", "padj", "pvalue") %>% 
   tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
   dplyr::mutate(padj = case_when(padj == 0 ~ .Machine$double.xmin,
                                 TRUE ~ padj), 
                 signed_padj = sign(log2FoldChange)*-log10(padj),
+                signed_p = sign(log2FoldChange)*-log10(pvalue),
                 minuslogp = -log10(padj)) %>%
   merge(genemap, by="ensembl_gene_id_version") %>%
   dplyr::arrange(desc(signed_padj)) 
 
-PMATNF_CAvsWT_pos <- subset(PMATNF_CAvsWT_list, signed_padj > 0) %>%
-  arrange(signed_padj, abs(log2FoldChange)) %>%
+CAPMAtreatment_pos <- subset(CAPMAtreatment_list, signed_padj > 0) %>%
+  arrange(signed_p, abs(log2FoldChange)) %>%
   mutate(rank = row_number()) %>%
   arrange(desc(rank))
 
-PMATNF_CAvsWT_neg <- subset(PMATNF_CAvsWT_list, signed_padj < 0) %>%
-  arrange(desc(signed_padj), abs(log2FoldChange)) %>%
+CAPMAtreatment_neg <- subset(CAPMAtreatment_list, signed_padj < 0) %>%
+  arrange(desc(signed_p), abs(log2FoldChange)) %>%
   mutate(rank = -row_number()) %>%
   arrange(desc(rank))
 
-PMATNF_CAvsWT_list <- bind_rows(PMATNF_CAvsWT_pos, PMATNF_CAvsWT_neg) %>% dplyr::arrange(desc(rank))
-write.xlsx(PMATNF_CAvsWT_list, "PMAdataset/PMATNF_CAvsWT.xlsx")
+CAPMAtreatment_list <- bind_rows(CAPMAtreatment_pos, CAPMAtreatment_neg) %>% dplyr::arrange(desc(rank))
+
+write.xlsx(CAPMAtreatment_list, "PMAdataset/CA_PMA_TreatmentInteraction.xlsx")
+```
+
+### CA Mutation - PMA+TNF Treatment Interaction Effect
+
+```{r}
+res_CAPMATNFtreatment <- DESeq2::results(dds, name = "TreatmentPMATNF.GenotypeCA", alpha = 0.05)
+summary(res_CAPMATNFtreatment)
+
+CAPMATNFtreatment_list<-data.frame(gene = rownames(res_CAPMATNFtreatment), res_CAPMATNFtreatment, stringsAsFactors = F) %>% 
+  na.omit() %>% 
+  dplyr::select("log2FoldChange", "padj", "pvalue") %>% 
+  tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
+  dplyr::mutate(padj = case_when(padj == 0 ~ .Machine$double.xmin,
+                                TRUE ~ padj), 
+                signed_padj = sign(log2FoldChange)*-log10(padj),
+                signed_p = sign(log2FoldChange)*-log10(pvalue),
+                minuslogp = -log10(padj)) %>%
+  merge(genemap, by="ensembl_gene_id_version") %>%
+  dplyr::arrange(desc(signed_padj)) 
+
+CAPMATNFtreatment_pos <- subset(CAPMATNFtreatment_list, signed_padj > 0) %>%
+  arrange(signed_p, abs(log2FoldChange)) %>%
+  mutate(rank = row_number()) %>%
+  arrange(desc(rank))
+
+CAPMATNFtreatment_neg <- subset(CAPMATNFtreatment_list, signed_padj < 0) %>%
+  arrange(desc(signed_p), abs(log2FoldChange)) %>%
+  mutate(rank = -row_number()) %>%
+  arrange(desc(rank))
+
+CAPMATNFtreatment_list <- bind_rows(CAPMATNFtreatment_pos, CAPMATNFtreatment_neg) %>% dplyr::arrange(desc(rank))
+
+write.xlsx(CAPMATNFtreatment_list, "PMAdataset/CA_PMA_TNF_TreatmentInteraction.xlsx")
 ```
 
 ```{r}
-selected_genes <- unique(
-  intersect(subset(wt_PMAvsUT_list, abs(log2FoldChange) >= 0.5 & padj <= 0.05)$ensembl_gene_id_version,
-  intersect(subset(ca_PMAvsUT_list, abs(log2FoldChange) >= 0.5 & padj <= 0.05)$ensembl_gene_id_version,
-  intersect(subset(wt_PMATNFvsPMA_list, abs(log2FoldChange) >= 0.5 & padj <= 0.05)$ensembl_gene_id_version,
-            subset(ca_PMATNFvsPMA_list, abs(log2FoldChange) >= 0.5 & padj <= 0.05)$ensembl_gene_id_version))))
-
-selected_genes <- readRDS("tnfUP_signature.RDS")
+tnfUP_signature <- readRDS("/Users/slothking/Desktop/Krappmann3/tnfUP_signature.RDS")
+tnf_signature_df <- read.xlsx("tnf_signature.xlsx")
 ```
 
 ```{r}
-data_heatmap <- subset(vsdMat, rownames(vsdMat) %in% selected_genes)
+data_heatmap <- subset(vsdMat, rownames(vsdMat) %in% tnfUP_signature)
 
 scaled_data = t(scale(t(data_heatmap)))
 
@@ -354,7 +418,12 @@ ordered_data <- as.matrix(ordered_data_temp[,coldata$Sample_ID])
 
 group_labels <- factor(coldata$Sample_Group)
 group_labels_unique <- unique(group_labels)
-group_colors <- c("#FF5733", "#33FF57", "#337AFF", "#FF33E9", "#FFD700", "#800080")
+group_colors <- c("WT_PMATNF_UT" = "#B0B0B0",
+                  "WT_PMA_2H" = "#696969",
+                  "WT_PMA_2H_TNF_1H" = "#2F4F4F",
+                  "CA_PMATNF_UT" = "#FF9999",
+                  "CA_PMA_2H" = "#FF6347",
+                  "CA_PMA_2H_TNF_1H" = "#B22222")
 names(group_colors) <- group_labels_unique
 
 
@@ -364,14 +433,18 @@ column_annotation <- HeatmapAnnotation(
   col = list(group = group_colors)
 )
 
+# Define a custom color function
+heatmap_colors <- colorRamp2(c(min(ordered_data), 0, max(ordered_data)),
+                             c("#6495ED", "#FFFFFF", "#FF4500"))
 
-pdf("PMAdataset/Heatmap_PMAdataset.pdf", width = 8, height = 5)
+pdf("PMAdataset/Heatmap_PMAdataset_TNF_UP_Signature.pdf", width = 8, height = 4)
 Heatmap(ordered_data, 
         name = "Expression", 
         show_row_names = TRUE, 
         show_column_names = TRUE,
         cluster_columns = FALSE,
         cluster_rows = TRUE,
+        col = heatmap_colors,  # Apply custom colors
         row_names_gp = gpar(fontsize = 5),
         top_annotation = column_annotation,
         column_names_gp = gpar(fontsize = 4))
@@ -379,8 +452,8 @@ dev.off()
 ```
 
 ```{r}
-data_heatmap <- subset(vsdMat, rownames(vsdMat) %in% subset(PMATNF_CAvsWT_list, 
-                                                            log2FoldChange <= -0.75 & padj <= 0.05)$ensembl_gene_id_version)
+ca_treatment_interaction_genes <- unique(c(subset(CAPMAtreatment_list, abs(log2FoldChange) >= 0.5 & padj <= 0.001)$ensembl_gene_id_version, subset(CAPMATNFtreatment_list, abs(log2FoldChange) >= 0.5 & padj <= 0.001)$ensembl_gene_id_version)) 
+data_heatmap <- subset(vsdMat, rownames(vsdMat) %in% ca_treatment_interaction_genes)
 
 scaled_data = t(scale(t(data_heatmap)))
 
@@ -390,13 +463,20 @@ ordered_data$ensembl_gene_id_version <- rownames(ordered_data)
 
 ordered_data_temp <- merge(ordered_data, genemap, by="ensembl_gene_id_version")
 
+tnfUP_signature_GENESYMBOL <- subset(genemap, ensembl_gene_id_version %in% tnfUP_signature)$hgnc_symbol
+
 rownames(ordered_data_temp) <-ordered_data_temp$unique_gene_id
 
 ordered_data <- as.matrix(ordered_data_temp[,coldata$Sample_ID])
 
 group_labels <- factor(coldata$Sample_Group)
 group_labels_unique <- unique(group_labels)
-group_colors <- c("#FF5733", "#33FF57", "#337AFF", "#FF33E9", "#FFD700", "#800080")
+group_colors <- c("WT_PMATNF_UT" = "#B0B0B0",
+                  "WT_PMA_2H" = "#696969",
+                  "WT_PMA_2H_TNF_1H" = "#2F4F4F",
+                  "CA_PMATNF_UT" = "#FF9999",
+                  "CA_PMA_2H" = "#FF6347",
+                  "CA_PMA_2H_TNF_1H" = "#B22222")
 names(group_colors) <- group_labels_unique
 
 
@@ -406,282 +486,420 @@ column_annotation <- HeatmapAnnotation(
   col = list(group = group_colors)
 )
 
+# Create the binary matrix
+binary_annotation <- ifelse(rownames(ordered_data) %in% tnfUP_signature_GENESYMBOL, 1, 0)
+binary_annotation <- matrix(binary_annotation, ncol = 1)
+colnames(binary_annotation) <- "TNF_UP"
 
-pdf("PMAdataset/Heatmap_PMAdataset_PMATNF_CAvsWT.pdf", width = 8, height = 8)
+# Define the color function for the binary annotation
+binary_col_fun <- colorRamp2(c(0, 1), c("white", "darkmagenta"))
+
+# Create a heatmap annotation object with narrower width
+row_annotation = rowAnnotation(
+  TNF_UP = anno_simple(binary_annotation, col = binary_col_fun, border = TRUE, width = unit(2, "mm"))
+)
+
+# Define a custom color function
+heatmap_colors <- colorRamp2(c(min(ordered_data), 0, max(ordered_data)),
+                             c("#6495ED", "#FFFFFF", "#FF4500"))
+
+pdf("PMAdataset/Heatmap_PMAdataset_CAtreatment_Interaction.pdf", width = 8, height = 8)
 Heatmap(ordered_data, 
         name = "Expression", 
         show_row_names = TRUE, 
         show_column_names = TRUE,
         cluster_columns = FALSE,
         cluster_rows = TRUE,
+        col = heatmap_colors,  # Apply custom colors
         row_names_gp = gpar(fontsize = 5),
         top_annotation = column_annotation,
-        column_names_gp = gpar(fontsize = 4))
+        column_names_gp = gpar(fontsize = 4),
+        right_annotation = row_annotation  # Add binary annotation next to the heatmap
+)
 dev.off()
 ```
 
+### GSVA Analysis
+
 ```{r}
-reactome_genesets <- msigdbr(species = "Homo sapiens", 
-                             category = "C2", 
-                             subcategory = "CP:REACTOME") %>% 
+cgp_genesets <- msigdbr(species = "Homo sapiens",
+                             category = "C2",
+                             subcategory = "CGP") %>%
   dplyr::select(gs_name, ensembl_gene) %>% distinct()
 
-reactome_genesets_subset <- reactome_genesets %>% 
-  subset(gs_name %in% c("REACTOME_TNFR2_NON_CANONICAL_NF_KB_PATHWAY",
-                        "REACTOME_NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL"))
+cgp_genesets_subset <- cgp_genesets %>%
+  subset(gs_name %in% c("TIAN_TNF_SIGNALING_VIA_NFKB"))
 
-reactome_list <- unlist(split(reactome_genesets_subset, 
-                              f = reactome_genesets_subset$gs_name), 
+tnf_signature_gsva_df <- tnf_signature_df %>% dplyr::select(c(ensembl_gene_id)) %>%
+  dplyr::rename("ensembl_gene" = "ensembl_gene_id") %>%
+  dplyr::mutate(gs_name = "TNF_UP_SIGNATURE")
+
+gsva_df <- bind_rows(cgp_genesets_subset, tnf_signature_gsva_df)
+```
+
+```{r}
+genesets_list <- unlist(split(gsva_df,
+                              f = gsva_df$gs_name),
                         recursive = F)
 
 vsdMat_ensembl <- vsdMat
 rownames(vsdMat_ensembl) <- str_remove(rownames(vsdMat), "\\..*$")
 
-gsva_object <- gsvaParam(exprData = as.matrix(vsdMat_ensembl), geneSets = reactome_list)
-gsva_res_reactome <- gsva(gsva_object, verbose=FALSE)
+gsva_object <- gsvaParam(exprData = as.matrix(vsdMat_ensembl), geneSets = genesets_list)
+gsva_res <- gsva(gsva_object, verbose=FALSE)
 
-gsva_res_reactome_melted <- reshape2::melt(gsva_res_reactome, 
+gsva_res_melted <- reshape2::melt(gsva_res,
                                            varnames=c('GeneSet', 'Sample_ID'),
                                            value.name = "GSVAscore") %>%
   dplyr::mutate(GeneSet = str_remove_all(GeneSet, ".gene_symbol"),
                 GeneSet = str_remove_all(GeneSet, "REACTOME_"))
 
-gsva_res_reactome_merged <- merge(gsva_res_reactome_melted, coldata, by="Sample_ID")
+gsva_res_merged <- merge(gsva_res_melted, coldata, by="Sample_ID")
 
-gsva_res_reactome_merged$Sample_Group <- factor(gsva_res_reactome_merged$Sample_Group, levels =
+gsva_res_merged$Sample_Group <- factor(gsva_res_merged$Sample_Group, levels =
                                                                    c("WT_PMATNF_UT", "WT_PMA_2H", "WT_PMA_2H_TNF_1H",
                                                                      "CA_PMATNF_UT", "CA_PMA_2H", "CA_PMA_2H_TNF_1H"))
 
-gsva_res_reactome_merged <- gsva_res_reactome_merged %>% arrange(Sample_Group) %>% dplyr::mutate(GeneSet = str_replace_all(GeneSet, ".ensembl_gene", ""))
+gsva_res_merged <- gsva_res_merged %>% arrange(Sample_Group) %>% dplyr::mutate(GeneSet = str_replace_all(GeneSet, ".ensembl_gene", ""))
 
 # Define group colors
-group_colors <- c("WT_PMATNF_UT" = "#FF5733",
-                  "WT_PMA_2H" = "#33FF57",
-                  "WT_PMA_2H_TNF_1H" = "#337AFF",
-                  "CA_PMATNF_UT" = "#FF33E9",
-                  "CA_PMA_2H" = "#FFD700",
-                  "CA_PMA_2H_TNF_1H" = "#800080")
+group_colors <- c("WT_PMATNF_UT" = "#B0B0B0",
+                  "WT_PMA_2H" = "#696969",
+                  "WT_PMA_2H_TNF_1H" = "#2F4F4F",
+                  "CA_PMATNF_UT" = "#FF9999",
+                  "CA_PMA_2H" = "#FF6347",
+                  "CA_PMA_2H_TNF_1H" = "#B22222")
 
 # Calculate means for each SampleGroup
-median <- gsva_res_reactome_merged %>%
+median <- gsva_res_merged %>%
   group_by(Sample_Group, GeneSet) %>%
   summarize(median_GSVAscore = median(GSVAscore))
 
-pdf("PMAdataset/GSVAexample.pdf", width = 4, height = 8)
-ggplot(gsva_res_reactome_merged, aes(y = GSVAscore, x = Sample_Group, color = Sample_Group)) +
-  geom_boxplot(outlier.shape = NA) +
-  geom_jitter(width = 0.1) +
-  scale_color_manual(values = group_colors) +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
-        strip.text = element_text(size = 4),
-        legend.position = "none") +
-  facet_wrap(~GeneSet, ncol = 1, nrow=2)
+pdf("PMAdataset/GSVA.pdf", width = 3.5, height = 8)
+ggplot(gsva_res_merged, aes(y = GSVAscore, x = Sample_Group, fill = Sample_Group)) +
+  geom_violin(alpha = 0.5, show.legend = FALSE) +  # Transparent violins and remove legend for fill
+  geom_jitter(width = 0.15, size = 1.5, alpha = 0.6, color = "black") +  # Black jitter points with adjusted size and transparency
+  scale_fill_manual(values = group_colors) +
+  theme_minimal(base_size = 12) +  # Increase base font size for better readability
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),  # Adjust x-axis text size
+    axis.title.x = element_text(size = 14),  # Add and adjust x-axis title
+    axis.title.y = element_text(size = 14),  # Add and adjust y-axis title
+    strip.text = element_text(size = 8),  # Adjust facet label size
+    legend.position = "none",  # Remove legend
+    panel.spacing = unit(1, "lines")  # Increase spacing between facets
+  ) +
+  labs(
+    x = "Sample Group",  # Add x-axis label
+    y = "GSVA Score",  # Add y-axis label
+  ) +
+  facet_wrap(~GeneSet, ncol = 1, nrow = 2)  # Adjust number of rows and columns in facet
 dev.off()
 ```
 
 ```{r}
-# Wilcoxon test for GSVA (NFKB Survival Pathway)
-wt_PMATNF_survival <- subset(gsva_res_reactome_merged, Sample_Group == "WT_PMA_2H_TNF_1H" & 
-                            GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
-wt_PMA_survival <- subset(gsva_res_reactome_merged, Sample_Group == "WT_PMA_2H" & 
-                            GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
-wt_UT_survival <- subset(gsva_res_reactome_merged, Sample_Group == "WT_PMATNF_UT" & 
-                            GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
-
-res_wt_PMATNF_survival <- wilcox.test(wt_PMATNF_survival, wt_UT_survival, correct = TRUE)
-res_wt_PMATNF_survival
-
-res_wt_PMATNF_vs_PMA_survival <- wilcox.test(wt_PMATNF_survival, wt_PMA_survival, correct = TRUE)
-res_wt_PMATNF_vs_PMA_survival
-
-res_wt_PMA_survival <- wilcox.test(wt_PMA_survival, wt_UT_survival, correct = TRUE)
-res_wt_PMA_survival
-
-ca_PMATNF_survival <- subset(gsva_res_reactome_merged, Sample_Group == "CA_PMA_2H_TNF_1H" & 
-                            GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
-ca_PMA_survival <- subset(gsva_res_reactome_merged, Sample_Group == "CA_PMA_2H" & 
-                            GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
-ca_UT_survival <- subset(gsva_res_reactome_merged, Sample_Group == "CA_PMATNF_UT" & 
-                            GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
-
-res_ca_PMATNF_survival <- wilcox.test(ca_PMATNF_survival, ca_UT_survival, correct = TRUE)
-res_ca_PMATNF_survival
-
-res_ca_PMATNF_vs_PMA_survival <- wilcox.test(ca_PMATNF_survival, ca_PMA_survival, correct = TRUE)
-res_ca_PMATNF_vs_PMA_survival
-
-res_ca_PMA_survival <- wilcox.test(ca_PMA_survival, ca_UT_survival, correct = TRUE)
-res_ca_PMA_survival
+# # Independence test for GSVA (TIAN_TNF_SIGNALING_VIA_NFKB)
+# wt_pma <- subset(gsva_res_merged, Sample_Group %in%
+#                                       c("WT_PMA_2H",  "WT_PMATNF_UT") &
+#                                       GeneSet == "TIAN_TNF_SIGNALING_VIA_NFKB")
+# wt_pmatnf <- subset(gsva_res_merged, Sample_Group %in%
+#                                       c("WT_PMA_2H_TNF_1H",  "WT_PMATNF_UT") &
+#                                       GeneSet == "TIAN_TNF_SIGNALING_VIA_NFKB")
+# ca_pma <- subset(gsva_res_merged, Sample_Group %in%
+#                                       c("CA_PMA_2H",  "CA_PMATNF_UT") &
+#                                       GeneSet == "TIAN_TNF_SIGNALING_VIA_NFKB")
+# ca_pmatnf <- subset(gsva_res_merged, Sample_Group %in%
+#                                       c("CA_PMA_2H_TNF_1H",  "CA_PMATNF_UT") &
+#                                       GeneSet == "TIAN_TNF_SIGNALING_VIA_NFKB")
+# ca_pma_vs_wt_pma <- subset(gsva_res_merged, Sample_Group %in%
+#                                       c("CA_PMA_2H",  "WT_PMA_2H") &
+#                                       GeneSet == "TIAN_TNF_SIGNALING_VIA_NFKB")
+# ca_pmatnf_vs_wt_pmatnf <- subset(gsva_res_merged, Sample_Group %in%
+#                                       c("CA_PMA_2H_TNF_1H", "WT_PMA_2H_TNF_1H") &
+#                                       GeneSet == "TIAN_TNF_SIGNALING_VIA_NFKB")
+# 
+# res_wt_pma <- independence_test(wt_pma$GSVAscore ~ factor(wt_pma$Sample_Group, levels = c("WT_PMA_2H",  "WT_PMATNF_UT")),
+#                                                   distribution = "asymptotic",
+#                                                   alternative = "two.sided")
+# 
+# res_wt_pmatnf <- independence_test(wt_pmatnf$GSVAscore ~ factor(wt_pmatnf$Sample_Group, levels = c("WT_PMA_2H_TNF_1H",  "WT_PMATNF_UT")),
+#                                                   distribution = "asymptotic",
+#                                                   alternative = "two.sided")
+# 
+# res_ca_pma <- independence_test(ca_pma$GSVAscore ~ factor(ca_pma$Sample_Group, levels = c("CA_PMA_2H",  "CA_PMATNF_UT")),
+#                                                       distribution = "asymptotic",
+#                                                       alternative = "two.sided")
+# 
+# res_ca_pmatnf <- independence_test(ca_pmatnf$GSVAscore ~ factor(ca_pmatnf$Sample_Group, levels = c("CA_PMA_2H_TNF_1H",  "CA_PMATNF_UT")),
+#                                                   distribution = "asymptotic",
+#                                                   alternative = "two.sided")
+# 
+# res_ca_pma_vs_wt_pma <- independence_test(ca_pma_vs_wt_pma$GSVAscore ~ factor(ca_pma_vs_wt_pma$Sample_Group, levels = c("CA_PMA_2H",  "WT_PMA_2H")),
+#                                                   distribution = "asymptotic",
+#                                                   alternative = "two.sided")
+# 
+# res_ca_pmatnf_vs_wt_pmatnf <- independence_test(ca_pmatnf_vs_wt_pmatnf$GSVAscore ~ factor(ca_pmatnf_vs_wt_pmatnf$Sample_Group, levels = c("CA_PMA_2H_TNF_1H", "WT_PMA_2H_TNF_1H")),
+#                                                   distribution = "asymptotic",
+#                                                   alternative = "two.sided")
+# 
+# res_wt_pma
+# res_wt_pmatnf
+# res_ca_pma
+# res_ca_pmatnf
+# res_ca_pma_vs_wt_pma
+# res_ca_pmatnf_vs_wt_pmatnf
+```
+```{r}
+# # Independence test for GSVA (TNF_UP_SIGNATURE)
+# wt_pma <- subset(gsva_res_merged, Sample_Group %in%
+#                                       c("WT_PMA_2H",  "WT_PMATNF_UT") &
+#                                       GeneSet == "TNF_UP_SIGNATURE")
+# wt_pmatnf <- subset(gsva_res_merged, Sample_Group %in%
+#                                       c("WT_PMA_2H_TNF_1H",  "WT_PMATNF_UT") &
+#                                       GeneSet == "TNF_UP_SIGNATURE")
+# ca_pma <- subset(gsva_res_merged, Sample_Group %in%
+#                                       c("CA_PMA_2H",  "CA_PMATNF_UT") &
+#                                       GeneSet == "TNF_UP_SIGNATURE")
+# ca_pmatnf <- subset(gsva_res_merged, Sample_Group %in%
+#                                       c("CA_PMA_2H_TNF_1H",  "CA_PMATNF_UT") &
+#                                       GeneSet == "TNF_UP_SIGNATURE")
+# ca_pma_vs_wt_pma <- subset(gsva_res_merged, Sample_Group %in%
+#                                       c("CA_PMA_2H",  "WT_PMA_2H") &
+#                                       GeneSet == "TNF_UP_SIGNATURE")
+# ca_pmatnf_vs_wt_pmatnf <- subset(gsva_res_merged, Sample_Group %in%
+#                                       c("CA_PMA_2H_TNF_1H", "WT_PMA_2H_TNF_1H") &
+#                                       GeneSet == "TNF_UP_SIGNATURE")
+# 
+# res_wt_pma <- independence_test(wt_pma$GSVAscore ~ factor(wt_pma$Sample_Group, levels = c("WT_PMA_2H",  "WT_PMATNF_UT")),
+#                                                   distribution = "asymptotic",
+#                                                   alternative = "two.sided")
+# res_wt_pmatnf <- independence_test(wt_pmatnf$GSVAscore ~ factor(wt_pmatnf$Sample_Group, levels = c("WT_PMA_2H_TNF_1H",  "WT_PMATNF_UT")),
+#                                                   distribution = "asymptotic",
+#                                                   alternative = "two.sided")
+# 
+# res_ca_pma <- independence_test(ca_pma$GSVAscore ~ factor(ca_pma$Sample_Group, levels = c("CA_PMA_2H",  "CA_PMATNF_UT")),
+#                                                       distribution = "asymptotic",
+#                                                       alternative = "two.sided")
+# 
+# res_ca_pmatnf <- independence_test(ca_pmatnf$GSVAscore ~ factor(ca_pmatnf$Sample_Group, levels = c("CA_PMA_2H_TNF_1H",  "CA_PMATNF_UT")),
+#                                                   distribution = "asymptotic",
+#                                                   alternative = "two.sided")
+# 
+# res_ca_pma_vs_wt_pma <- independence_test(ca_pma_vs_wt_pma$GSVAscore ~ factor(ca_pma_vs_wt_pma$Sample_Group, levels = c("CA_PMA_2H",  "WT_PMA_2H")),
+#                                                   distribution = "asymptotic",
+#                                                   alternative = "two.sided")
+# 
+# res_ca_pmatnf_vs_wt_pmatnf <- independence_test(ca_pmatnf_vs_wt_pmatnf$GSVAscore ~ factor(ca_pmatnf_vs_wt_pmatnf$Sample_Group, levels = c("CA_PMA_2H_TNF_1H", "WT_PMA_2H_TNF_1H")),
+#                                                   distribution = "asymptotic",
+#                                                   alternative = "two.sided")
+# 
+# res_wt_pma
+# res_wt_pmatnf
+# res_ca_pma
+# res_ca_pmatnf
+# res_ca_pma_vs_wt_pma
+# res_ca_pmatnf_vs_wt_pmatnf
 ```
 
 ```{r}
-# Independence test for GSVA (NFKB Survival Pathway)
-wt_PMATNF_vs_PMA_survival <- subset(gsva_res_reactome_merged, Sample_Group %in% 
-                                      c("WT_PMA_2H_TNF_1H",  "WT_PMA_2H") &
-                                      GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")
-wt_PMATNF_vs_UT_survival <- subset(gsva_res_reactome_merged, Sample_Group %in% 
-                                      c("WT_PMA_2H_TNF_1H",  "WT_PMATNF_UT") &
-                                      GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")
-wt_PMA_vs_UT_survival <- subset(gsva_res_reactome_merged, Sample_Group %in% 
-                                      c("WT_PMA_2H",  "WT_PMATNF_UT") &
-                                      GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")
-
-res_wt_PMATNF_vs_PMA_survival <- independence_test(wt_PMATNF_vs_PMA_survival$GSVAscore ~
-                                                     factor(wt_PMATNF_vs_PMA_survival$Sample_Group, 
-                                                            levels = c("WT_PMA_2H_TNF_1H", "WT_PMA_2H")),
-                                                   distribution = "exact",
-                                                   alternative = "greater")
-res_wt_PMATNF_vs_PMA_survival
-
-res_wt_PMATNF_vs_UT_survival <- independence_test(wt_PMATNF_vs_UT_survival$GSVAscore ~
-                                                     factor(wt_PMATNF_vs_UT_survival$Sample_Group, 
-                                                            levels = c("WT_PMA_2H_TNF_1H", "WT_PMATNF_UT")),
-                                                   distribution = "exact",
-                                                   alternative = "greater")
-res_wt_PMATNF_vs_UT_survival
-
-res_wt_PMA_vs_UT_survival <- independence_test(wt_PMA_vs_UT_survival$GSVAscore ~
-                                                     factor(wt_PMA_vs_UT_survival$Sample_Group, 
-                                                            levels = c("WT_PMA_2H", "WT_PMATNF_UT")),
-                                                   distribution = "exact",
-                                                   alternative = "greater")
-res_wt_PMA_vs_UT_survival
-
-ca_PMATNF_vs_PMA_survival <- subset(gsva_res_reactome_merged, Sample_Group %in% 
-                                      c("CA_PMA_2H_TNF_1H",  "CA_PMA_2H") &
-                                      GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")
-ca_PMATNF_vs_UT_survival <- subset(gsva_res_reactome_merged, Sample_Group %in% 
-                                      c("CA_PMA_2H_TNF_1H",  "CA_PMATNF_UT") &
-                                      GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")
-ca_PMA_vs_UT_survival <- subset(gsva_res_reactome_merged, Sample_Group %in% 
-                                      c("CA_PMA_2H",  "CA_PMATNF_UT") &
-                                      GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")
-
-res_ca_PMATNF_vs_PMA_survival <- independence_test(ca_PMATNF_vs_PMA_survival$GSVAscore ~
-                                                     factor(ca_PMATNF_vs_PMA_survival$Sample_Group, 
-                                                            levels = c("CA_PMA_2H_TNF_1H", "CA_PMA_2H")),
-                                                   distribution = "exact",
-                                                   alternative = "greater")
-res_ca_PMATNF_vs_PMA_survival
-
-res_ca_PMATNF_vs_UT_survival <- independence_test(ca_PMATNF_vs_UT_survival$GSVAscore ~
-                                                     factor(ca_PMATNF_vs_UT_survival$Sample_Group, 
-                                                            levels = c("CA_PMA_2H_TNF_1H", "CA_PMATNF_UT")),
-                                                   distribution = "exact",
-                                                   alternative = "greater")
-res_ca_PMATNF_vs_UT_survival
-
-res_ca_PMA_vs_UT_survival <- independence_test(ca_PMA_vs_UT_survival$GSVAscore ~
-                                                     factor(ca_PMA_vs_UT_survival$Sample_Group, 
-                                                            levels = c("CA_PMA_2H", "CA_PMATNF_UT")),
-                                                   distribution = "exact",
-                                                   alternative = "greater")
-res_ca_PMA_vs_UT_survival
+# Wilcoxon test for GSVA (TIAN_TNF_SIGNALING_VIA_NFKB)
+# wt_PMATNF_survival <- subset(gsva_res_reactome_merged, Sample_Group == "WT_PMA_2H_TNF_1H" &
+#                             GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
+# wt_PMA_survival <- subset(gsva_res_reactome_merged, Sample_Group == "WT_PMA_2H" &
+#                             GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
+# wt_UT_survival <- subset(gsva_res_reactome_merged, Sample_Group == "WT_PMATNF_UT" &
+#                             GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
+#
+# res_wt_PMATNF_survival <- wilcox.test(wt_PMATNF_survival, wt_UT_survival, correct = TRUE)
+# res_wt_PMATNF_survival
+#
+# res_wt_PMATNF_vs_PMA_survival <- wilcox.test(wt_PMATNF_survival, wt_PMA_survival, correct = TRUE)
+# res_wt_PMATNF_vs_PMA_survival
+#
+# res_wt_PMA_survival <- wilcox.test(wt_PMA_survival, wt_UT_survival, correct = TRUE)
+# res_wt_PMA_survival
+#
+# ca_PMATNF_survival <- subset(gsva_res_reactome_merged, Sample_Group == "CA_PMA_2H_TNF_1H" &
+#                             GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
+# ca_PMA_survival <- subset(gsva_res_reactome_merged, Sample_Group == "CA_PMA_2H" &
+#                             GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
+# ca_UT_survival <- subset(gsva_res_reactome_merged, Sample_Group == "CA_PMATNF_UT" &
+#                             GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
+#
+# res_ca_PMATNF_survival <- wilcox.test(ca_PMATNF_survival, ca_UT_survival, correct = TRUE)
+# res_ca_PMATNF_survival
+#
+# res_ca_PMATNF_vs_PMA_survival <- wilcox.test(ca_PMATNF_survival, ca_PMA_survival, correct = TRUE)
+# res_ca_PMATNF_vs_PMA_survival
+#
+# res_ca_PMA_survival <- wilcox.test(ca_PMA_survival, ca_UT_survival, correct = TRUE)
+# res_ca_PMA_survival
 ```
 
 ```{r}
 # Wilcoxon test for TNFR2_NON_CANONICAL_NF_KB_PATHWAY
-wt_PMATNF_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "WT_PMA_2H_TNF_1H" & 
-                            GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
-wt_PMA_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "WT_PMA_2H" & 
-                            GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
-wt_UT_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "WT_PMATNF_UT" & 
-                            GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
-
-res_wt_PMATNF_noncanonical <- wilcox.test(wt_PMATNF_noncanonical, wt_UT_noncanonical, alternative = "greater", correct = T)
-res_wt_PMATNF_noncanonical
-
-res_wt_PMATNF_vs_PMA_noncanonical <- wilcox.test(wt_PMATNF_noncanonical, wt_PMA_noncanonical, alternative = "greater", correct = T)
-res_wt_PMATNF_vs_PMA_noncanonical
-
-res_wt_PMA_noncanonical <- wilcox.test(wt_PMA_noncanonical, wt_UT_noncanonical, alternative = "greater", correct = T)
-res_wt_PMA_noncanonical
-
-ca_PMATNF_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "CA_PMA_2H_TNF_1H" & 
-                            GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
-ca_PMA_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "CA_PMA_2H" & 
-                            GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
-ca_UT_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "CA_PMATNF_UT" & 
-                            GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
-
-res_ca_PMATNF_noncanonical <- wilcox.test(ca_PMATNF_noncanonical, ca_UT_noncanonical, alternative = "greater", correct = T)
-res_ca_PMATNF_noncanonical
-
-res_ca_PMATNF_vs_PMA_noncanonical <- wilcox.test(ca_PMATNF_survival, ca_PMA_noncanonical, alternative = "greater", correct = T)
-res_ca_PMATNF_vs_PMA_noncanonical
-
-res_ca_PMA_noncanonical <- wilcox.test(ca_PMA_noncanonical, ca_UT_noncanonical, alternative = "greater", correct = T)
-res_ca_PMA_noncanonical
+# wt_PMATNF_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "WT_PMA_2H_TNF_1H" &
+#                             GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
+# wt_PMA_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "WT_PMA_2H" &
+#                             GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
+# wt_UT_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "WT_PMATNF_UT" &
+#                             GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
+#
+# res_wt_PMATNF_noncanonical <- wilcox.test(wt_PMATNF_noncanonical, wt_UT_noncanonical, alternative = "greater", correct = T)
+# res_wt_PMATNF_noncanonical
+#
+# res_wt_PMATNF_vs_PMA_noncanonical <- wilcox.test(wt_PMATNF_noncanonical, wt_PMA_noncanonical, alternative = "greater", correct = T)
+# res_wt_PMATNF_vs_PMA_noncanonical
+#
+# res_wt_PMA_noncanonical <- wilcox.test(wt_PMA_noncanonical, wt_UT_noncanonical, alternative = "greater", correct = T)
+# res_wt_PMA_noncanonical
+#
+# ca_PMATNF_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "CA_PMA_2H_TNF_1H" &
+#                             GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
+# ca_PMA_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "CA_PMA_2H" &
+#                             GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
+# ca_UT_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "CA_PMATNF_UT" &
+#                             GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
+#
+# res_ca_PMATNF_noncanonical <- wilcox.test(ca_PMATNF_noncanonical, ca_UT_noncanonical, alternative = "greater", correct = T)
+# res_ca_PMATNF_noncanonical
+#
+# res_ca_PMATNF_vs_PMA_noncanonical <- wilcox.test(ca_PMATNF_survival, ca_PMA_noncanonical, alternative = "greater", correct = T)
+# res_ca_PMATNF_vs_PMA_noncanonical
+#
+# res_ca_PMA_noncanonical <- wilcox.test(ca_PMA_noncanonical, ca_UT_noncanonical, alternative = "greater", correct = T)
+# res_ca_PMA_noncanonical
 ```
 
 ```{r}
 # Independence test for TNFR2_NON_CANONICAL_NF_KB_PATHWAY
-wt_PMATNF_vs_PMA_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group %in% 
-                                      c("WT_PMA_2H_TNF_1H",  "WT_PMA_2H") &
-                                      GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")
-wt_PMATNF_vs_UT_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group %in% 
-                                      c("WT_PMA_2H_TNF_1H",  "WT_PMATNF_UT") &
-                                      GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")
-wt_PMA_vs_UT_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group %in% 
-                                      c("WT_PMA_2H",  "WT_PMATNF_UT") &
-                                      GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")
-
-res_wt_PMATNF_vs_PMA_noncanonical <- independence_test(wt_PMATNF_vs_PMA_noncanonical$GSVAscore ~
-                                                     factor(wt_PMATNF_vs_PMA_noncanonical$Sample_Group, 
-                                                            levels = c("WT_PMA_2H_TNF_1H", "WT_PMA_2H")),
-                                                   distribution = "exact",
-                                                   alternative = "greater")
-res_wt_PMATNF_vs_PMA_noncanonical
-
-res_wt_PMATNF_vs_UT_noncanonical <- independence_test(wt_PMATNF_vs_UT_noncanonical$GSVAscore ~
-                                                     factor(wt_PMATNF_vs_UT_noncanonical$Sample_Group, 
-                                                            levels = c("WT_PMA_2H_TNF_1H", "WT_PMATNF_UT")),
-                                                   distribution = "exact",
-                                                   alternative = "greater")
-res_wt_PMATNF_vs_UT_noncanonical
-
-res_wt_PMA_vs_UT_noncanonical <- independence_test(wt_PMA_vs_UT_noncanonical$GSVAscore ~
-                                                     factor(wt_PMA_vs_UT_noncanonical$Sample_Group, 
-                                                            levels = c("WT_PMA_2H", "WT_PMATNF_UT")),
-                                                   distribution = "exact",
-                                                   alternative = "greater")
-res_wt_PMA_vs_UT_noncanonical
-
-ca_PMATNF_vs_PMA_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group %in% 
-                                      c("CA_PMA_2H_TNF_1H",  "CA_PMA_2H") &
-                                      GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")
-ca_PMATNF_vs_UT_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group %in% 
-                                      c("CA_PMA_2H_TNF_1H",  "CA_PMATNF_UT") &
-                                      GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")
-ca_PMA_vs_UT_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group %in% 
-                                      c("CA_PMA_2H",  "CA_PMATNF_UT") &
-                                      GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")
-
-res_ca_PMATNF_vs_PMA_noncanonical <- independence_test(ca_PMATNF_vs_PMA_noncanonical$GSVAscore ~
-                                                     factor(ca_PMATNF_vs_PMA_noncanonical$Sample_Group, 
-                                                            levels = c("CA_PMA_2H_TNF_1H", "CA_PMA_2H")),
-                                                   distribution = "exact",
-                                                   alternative = "greater")
-res_ca_PMATNF_vs_PMA_noncanonical
-
-res_ca_PMATNF_vs_UT_noncanonical <- independence_test(ca_PMATNF_vs_UT_noncanonical$GSVAscore ~
-                                                     factor(ca_PMATNF_vs_UT_noncanonical$Sample_Group, 
-                                                            levels = c("CA_PMA_2H_TNF_1H", "CA_PMATNF_UT")),
-                                                   distribution = "exact",
-                                                   alternative = "greater")
-res_ca_PMATNF_vs_UT_noncanonical
-
-res_ca_PMA_vs_UT_noncanonical <- independence_test(ca_PMA_vs_UT_noncanonical$GSVAscore ~
-                                                     factor(ca_PMA_vs_UT_noncanonical$Sample_Group, 
-                                                            levels = c("CA_PMA_2H", "CA_PMATNF_UT")),
-                                                   distribution = "exact",
-                                                   alternative = "greater")
-res_ca_PMA_vs_UT_noncanonical
+# wt_PMATNF_vs_PMA_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group %in% 
+#                                       c("WT_PMA_2H_TNF_1H",  "WT_PMA_2H") &
+#                                       GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")
+# wt_PMATNF_vs_UT_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group %in% 
+#                                       c("WT_PMA_2H_TNF_1H",  "WT_PMATNF_UT") &
+#                                       GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")
+# wt_PMA_vs_UT_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group %in% 
+#                                       c("WT_PMA_2H",  "WT_PMATNF_UT") &
+#                                       GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")
+# 
+# res_wt_PMATNF_vs_PMA_noncanonical <- independence_test(wt_PMATNF_vs_PMA_noncanonical$GSVAscore ~
+#                                                      factor(wt_PMATNF_vs_PMA_noncanonical$Sample_Group, 
+#                                                             levels = c("WT_PMA_2H_TNF_1H", "WT_PMA_2H")),
+#                                                    distribution = "exact",
+#                                                    alternative = "greater")
+# res_wt_PMATNF_vs_PMA_noncanonical
+# 
+# res_wt_PMATNF_vs_UT_noncanonical <- independence_test(wt_PMATNF_vs_UT_noncanonical$GSVAscore ~
+#                                                      factor(wt_PMATNF_vs_UT_noncanonical$Sample_Group, 
+#                                                             levels = c("WT_PMA_2H_TNF_1H", "WT_PMATNF_UT")),
+#                                                    distribution = "exact",
+#                                                    alternative = "greater")
+# res_wt_PMATNF_vs_UT_noncanonical
+# 
+# res_wt_PMA_vs_UT_noncanonical <- independence_test(wt_PMA_vs_UT_noncanonical$GSVAscore ~
+#                                                      factor(wt_PMA_vs_UT_noncanonical$Sample_Group, 
+#                                                             levels = c("WT_PMA_2H", "WT_PMATNF_UT")),
+#                                                    distribution = "exact",
+#                                                    alternative = "greater")
+# res_wt_PMA_vs_UT_noncanonical
+# 
+# ca_PMATNF_vs_PMA_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group %in% 
+#                                       c("CA_PMA_2H_TNF_1H",  "CA_PMA_2H") &
+#                                       GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")
+# ca_PMATNF_vs_UT_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group %in% 
+#                                       c("CA_PMA_2H_TNF_1H",  "CA_PMATNF_UT") &
+#                                       GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")
+# ca_PMA_vs_UT_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group %in% 
+#                                       c("CA_PMA_2H",  "CA_PMATNF_UT") &
+#                                       GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")
+# 
+# res_ca_PMATNF_vs_PMA_noncanonical <- independence_test(ca_PMATNF_vs_PMA_noncanonical$GSVAscore ~
+#                                                      factor(ca_PMATNF_vs_PMA_noncanonical$Sample_Group, 
+#                                                             levels = c("CA_PMA_2H_TNF_1H", "CA_PMA_2H")),
+#                                                    distribution = "exact",
+#                                                    alternative = "greater")
+# res_ca_PMATNF_vs_PMA_noncanonical
+# 
+# res_ca_PMATNF_vs_UT_noncanonical <- independence_test(ca_PMATNF_vs_UT_noncanonical$GSVAscore ~
+#                                                      factor(ca_PMATNF_vs_UT_noncanonical$Sample_Group, 
+#                                                             levels = c("CA_PMA_2H_TNF_1H", "CA_PMATNF_UT")),
+#                                                    distribution = "exact",
+#                                                    alternative = "greater")
+# res_ca_PMATNF_vs_UT_noncanonical
+# 
+# res_ca_PMA_vs_UT_noncanonical <- independence_test(ca_PMA_vs_UT_noncanonical$GSVAscore ~
+#                                                      factor(ca_PMA_vs_UT_noncanonical$Sample_Group, 
+#                                                             levels = c("CA_PMA_2H", "CA_PMATNF_UT")),
+#                                                    distribution = "exact",
+#                                                    alternative = "greater")
+# res_ca_PMA_vs_UT_noncanonical
 ```
 
 ```{r}
-vsd_counts_melted_selectedgenes <- subset(vsdmelted, ensembl_gene_id_version %in% selected_genes)
+# Wilcoxon test for GSVA (TIAN_TNF_SIGNALING_VIA_NFKB)
+wt_PMATNF <- subset(gsva_res_merged, Sample_Group == "WT_PMA_2H_TNF_1H" &
+                            GeneSet == "TIAN_TNF_SIGNALING_VIA_NFKB")$GSVAscore
+wt_PMA <- subset(gsva_res_merged, Sample_Group == "WT_PMA_2H" &
+                            GeneSet == "TIAN_TNF_SIGNALING_VIA_NFKB")$GSVAscore
+wt_UT <- subset(gsva_res_merged, Sample_Group == "WT_PMATNF_UT" &
+                            GeneSet == "TIAN_TNF_SIGNALING_VIA_NFKB")$GSVAscore
+ca_PMATNF <- subset(gsva_res_merged, Sample_Group == "CA_PMA_2H_TNF_1H" &
+                            GeneSet == "TIAN_TNF_SIGNALING_VIA_NFKB")$GSVAscore
+ca_PMA <- subset(gsva_res_merged, Sample_Group == "CA_PMA_2H" &
+                            GeneSet == "TIAN_TNF_SIGNALING_VIA_NFKB")$GSVAscore
+ca_UT <- subset(gsva_res_merged, Sample_Group == "CA_PMATNF_UT" &
+                            GeneSet == "TIAN_TNF_SIGNALING_VIA_NFKB")$GSVAscore
+
+res_wt_PMATNF <- wilcox.test(wt_PMATNF, wt_UT, correct = TRUE)
+res_wt_PMA <- wilcox.test(wt_PMA, wt_UT, correct = TRUE)
+res_ca_PMATNF <- wilcox.test(ca_PMATNF, ca_UT, correct = TRUE)
+res_ca_PMA <- wilcox.test(ca_PMA, ca_UT, correct = TRUE)
+res_PMA_ca_vs_wt <- wilcox.test(ca_PMA, wt_PMA, correct = TRUE)
+res_PMATNF_ca_vs_wt <- wilcox.test(ca_PMATNF, wt_PMATNF, correct = TRUE)
+
+res_wt_PMATNF
+res_wt_PMA
+res_ca_PMATNF
+res_ca_PMA
+res_PMA_ca_vs_wt
+res_PMATNF_ca_vs_wt
+```
+
+```{r}
+# Wilcoxon test for GSVA (TNF_UP_SIGNATURE)
+wt_PMATNF <- subset(gsva_res_merged, Sample_Group == "WT_PMA_2H_TNF_1H" &
+                            GeneSet == "TNF_UP_SIGNATURE")$GSVAscore
+wt_PMA <- subset(gsva_res_merged, Sample_Group == "WT_PMA_2H" &
+                            GeneSet == "TNF_UP_SIGNATURE")$GSVAscore
+wt_UT <- subset(gsva_res_merged, Sample_Group == "WT_PMATNF_UT" &
+                            GeneSet == "TNF_UP_SIGNATURE")$GSVAscore
+ca_PMATNF <- subset(gsva_res_merged, Sample_Group == "CA_PMA_2H_TNF_1H" &
+                            GeneSet == "TNF_UP_SIGNATURE")$GSVAscore
+ca_PMA <- subset(gsva_res_merged, Sample_Group == "CA_PMA_2H" &
+                            GeneSet == "TNF_UP_SIGNATURE")$GSVAscore
+ca_UT <- subset(gsva_res_merged, Sample_Group == "CA_PMATNF_UT" &
+                            GeneSet == "TNF_UP_SIGNATURE")$GSVAscore
+
+res_wt_PMATNF <- wilcox.test(wt_PMATNF, wt_UT, correct = TRUE)
+res_wt_PMA <- wilcox.test(wt_PMA, wt_UT, correct = TRUE)
+res_ca_PMATNF <- wilcox.test(ca_PMATNF, ca_UT, correct = TRUE)
+res_ca_PMA <- wilcox.test(ca_PMA, ca_UT, correct = TRUE)
+res_PMA_ca_vs_wt <- wilcox.test(ca_PMA, wt_PMA, correct = TRUE)
+res_PMATNF_ca_vs_wt <- wilcox.test(ca_PMATNF, wt_PMATNF, correct = TRUE)
+
+res_wt_PMATNF
+res_wt_PMA
+res_ca_PMATNF
+res_ca_PMA
+res_PMA_ca_vs_wt
+res_PMATNF_ca_vs_wt
+```
+
+```{r}
+ca_treatment_interaction_genes <- unique(c(subset(CAPMAtreatment_list, abs(log2FoldChange) >= 0.5 & padj <= 0.001)$ensembl_gene_id_version, subset(CAPMATNFtreatment_list, abs(log2FoldChange) >= 0.5 & padj <= 0.001)$ensembl_gene_id_version)) 
+
+vsd_counts_melted_selectedgenes <- subset(vsdmelted, ensembl_gene_id_version %in% ca_treatment_interaction_genes)
 
 vsd_counts_melted_selectedgenes_annotated <- merge(vsd_counts_melted_selectedgenes, coldata, by="Sample_ID") 
 
@@ -698,7 +916,7 @@ vsd_counts_melted_selectedgenes_annotated_subset <- subset(vsd_counts_melted_sel
 
 
 # Start a new PDF file with 1 plot per page
-pdf("PMAdataset/gene_boxplots_PMAdataset.pdf", width = 1.8, height=3)
+pdf("PMAdataset/gene_boxplots_PMAdataset_CAtreatment_interaction.pdf", width = 1.8, height=3)
 
 # Loop over each gene and create a plot on a new page
 for (g in unique(vsd_counts_melted_selectedgenes_annotated_subset$ensembl_gene_id_version)) {
@@ -743,141 +961,284 @@ dev.off()
 ```
 
 ```{r}
-PMATNF_CAvsWT_ranked<-PMATNF_CAvsWT_list$rank
-names(PMATNF_CAvsWT_ranked)<-str_remove(PMATNF_CAvsWT_list$ensembl_gene_id_version, "\\..*$")
-
-
-reac_enrich_PMATNF_CAvsWT_GSEAobject <- GSEA(PMATNF_CAvsWT_ranked, TERM2GENE = reactome_genesets, eps = 0, pvalueCutoff = 0.1, nPermSimple = 1e4)
-reac_enrich_PMATNF_CAvsWT_GSEAobject <- setReadable(reac_enrich_PMATNF_CAvsWT_GSEAobject, 'org.Hs.eg.db', 'ENSEMBL')
-reac_enrich_PMATNF_CAvsWT <- reac_enrich_PMATNF_CAvsWT_GSEAobject@result %>%
-  dplyr::mutate(signed_padj = sign(NES)*-log10(p.adjust)) %>%
-  dplyr::arrange(desc(signed_padj))
+# PMATNF_CAvsWT_ranked<-PMATNF_CAvsWT_list$rank
+# names(PMATNF_CAvsWT_ranked)<-str_remove(PMATNF_CAvsWT_list$ensembl_gene_id_version, "\\..*$")
+# 
+# 
+# reac_enrich_PMATNF_CAvsWT_GSEAobject <- GSEA(PMATNF_CAvsWT_ranked, TERM2GENE = reactome_genesets, eps = 0, pvalueCutoff = 0.1, nPermSimple = 1e4)
+# reac_enrich_PMATNF_CAvsWT_GSEAobject <- setReadable(reac_enrich_PMATNF_CAvsWT_GSEAobject, 'org.Hs.eg.db', 'ENSEMBL')
+# reac_enrich_PMATNF_CAvsWT <- reac_enrich_PMATNF_CAvsWT_GSEAobject@result %>%
+#   dplyr::mutate(signed_padj = sign(NES)*-log10(p.adjust)) %>%
+#   dplyr::arrange(desc(signed_padj))
 ```
 
 
 ```{r}
-canonical_nfkb_genes <- subset(reactome_genesets, gs_name == "REACTOME_NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$ensembl_gene
-
-data_heatmap <- subset(vsdMat, str_remove(rownames(vsdMat), "\\..*$") %in% canonical_nfkb_genes)
-
-scaled_data = na.omit(t(scale(t(data_heatmap)))) 
-
-ordered_data <- as.data.frame(scaled_data[,coldata$Sample_ID])
-
-ordered_data$ensembl_gene_id_version <- rownames(ordered_data)
-
-ordered_data_temp <- merge(ordered_data, genemap, by="ensembl_gene_id_version")
-
-rownames(ordered_data_temp) <-ordered_data_temp$unique_gene_id
-
-ordered_data <- ordered_data_temp[,coldata$Sample_ID]
-
-group_labels <- factor(coldata$Sample_Group)
-group_labels_unique <- unique(group_labels)
-group_colors <- c("#FF5733", "#33FF57", "#337AFF", "#FF33E9", "#FFD700", "#800080")
-names(group_colors) <- group_labels_unique
-
-
-
-column_annotation <- HeatmapAnnotation(
-  group = group_labels,
-  col = list(group = group_colors)
-)
-
-
-pdf("PMAdataset/Heatmap_PMAdataset_CanonicalNFKB.pdf", width = 6, height = 2)
-Heatmap(ordered_data, 
-        name = "Expression", 
-        show_row_names = TRUE, 
-        show_column_names = TRUE,
-        cluster_columns = FALSE,
-        cluster_rows = TRUE,
-        row_names_gp = gpar(fontsize = 5),
-        top_annotation = column_annotation,
-        column_names_gp = gpar(fontsize = 4))
-dev.off()
+# canonical_nfkb_genes <- subset(reactome_genesets, gs_name == "REACTOME_NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$ensembl_gene
+# 
+# data_heatmap <- subset(vsdMat, str_remove(rownames(vsdMat), "\\..*$") %in% canonical_nfkb_genes)
+# 
+# scaled_data = na.omit(t(scale(t(data_heatmap)))) 
+# 
+# ordered_data <- as.data.frame(scaled_data[,coldata$Sample_ID])
+# 
+# ordered_data$ensembl_gene_id_version <- rownames(ordered_data)
+# 
+# ordered_data_temp <- merge(ordered_data, genemap, by="ensembl_gene_id_version")
+# 
+# rownames(ordered_data_temp) <-ordered_data_temp$unique_gene_id
+# 
+# ordered_data <- ordered_data_temp[,coldata$Sample_ID]
+# 
+# group_labels <- factor(coldata$Sample_Group)
+# group_labels_unique <- unique(group_labels)
+# group_colors <- c("#FF5733", "#33FF57", "#337AFF", "#FF33E9", "#FFD700", "#800080")
+# names(group_colors) <- group_labels_unique
+# 
+# 
+# 
+# column_annotation <- HeatmapAnnotation(
+#   group = group_labels,
+#   col = list(group = group_colors)
+# )
+# 
+# 
+# pdf("PMAdataset/Heatmap_PMAdataset_CanonicalNFKB.pdf", width = 6, height = 2)
+# Heatmap(ordered_data, 
+#         name = "Expression", 
+#         show_row_names = TRUE, 
+#         show_column_names = TRUE,
+#         cluster_columns = FALSE,
+#         cluster_rows = TRUE,
+#         row_names_gp = gpar(fontsize = 5),
+#         top_annotation = column_annotation,
+#         column_names_gp = gpar(fontsize = 4))
+# dev.off()
 ```
 
 ```{r}
-tnfr2_noncanonical_nfkb_genes <- subset(reactome_genesets, gs_name == "REACTOME_TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$ensembl_gene
-
-data_heatmap <- subset(vsdMat, str_remove(rownames(vsdMat), "\\..*$") %in% tnfr2_noncanonical_nfkb_genes)
-
-scaled_data = na.omit(t(scale(t(data_heatmap)))) 
-
-ordered_data <- as.data.frame(scaled_data[,coldata$Sample_ID])
-
-ordered_data$ensembl_gene_id_version <- rownames(ordered_data)
-
-ordered_data_temp <- merge(ordered_data, genemap, by="ensembl_gene_id_version")
-
-rownames(ordered_data_temp) <-ordered_data_temp$unique_gene_id
-
-ordered_data <- ordered_data_temp[,coldata$Sample_ID]
-
-group_labels <- factor(coldata$Sample_Group)
-group_labels_unique <- unique(group_labels)
-group_colors <- c("#FF5733", "#33FF57", "#337AFF", "#FF33E9", "#FFD700", "#800080")
-names(group_colors) <- group_labels_unique
-
-
-
-column_annotation <- HeatmapAnnotation(
-  group = group_labels,
-  col = list(group = group_colors)
-)
-
-
-pdf("PMAdataset/Heatmap_PMAdataset_TNFR2noncanonicalNFKB.pdf", width = 6, height = 7)
-Heatmap(ordered_data, 
-        name = "Expression", 
-        show_row_names = TRUE, 
-        show_column_names = TRUE,
-        cluster_columns = FALSE,
-        cluster_rows = TRUE,
-        row_names_gp = gpar(fontsize = 5),
-        top_annotation = column_annotation,
-        column_names_gp = gpar(fontsize = 4))
-dev.off()
+# tnfr2_noncanonical_nfkb_genes <- subset(reactome_genesets, gs_name == "REACTOME_TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$ensembl_gene
+# 
+# data_heatmap <- subset(vsdMat, str_remove(rownames(vsdMat), "\\..*$") %in% tnfr2_noncanonical_nfkb_genes)
+# 
+# scaled_data = na.omit(t(scale(t(data_heatmap)))) 
+# 
+# ordered_data <- as.data.frame(scaled_data[,coldata$Sample_ID])
+# 
+# ordered_data$ensembl_gene_id_version <- rownames(ordered_data)
+# 
+# ordered_data_temp <- merge(ordered_data, genemap, by="ensembl_gene_id_version")
+# 
+# rownames(ordered_data_temp) <-ordered_data_temp$unique_gene_id
+# 
+# ordered_data <- ordered_data_temp[,coldata$Sample_ID]
+# 
+# group_labels <- factor(coldata$Sample_Group)
+# group_labels_unique <- unique(group_labels)
+# group_colors <- c("#FF5733", "#33FF57", "#337AFF", "#FF33E9", "#FFD700", "#800080")
+# names(group_colors) <- group_labels_unique
+# 
+# 
+# 
+# column_annotation <- HeatmapAnnotation(
+#   group = group_labels,
+#   col = list(group = group_colors)
+# )
+# 
+# 
+# pdf("PMAdataset/Heatmap_PMAdataset_TNFR2noncanonicalNFKB.pdf", width = 6, height = 7)
+# Heatmap(ordered_data, 
+#         name = "Expression", 
+#         show_row_names = TRUE, 
+#         show_column_names = TRUE,
+#         cluster_columns = FALSE,
+#         cluster_rows = TRUE,
+#         row_names_gp = gpar(fontsize = 5),
+#         top_annotation = column_annotation,
+#         column_names_gp = gpar(fontsize = 4))
+# dev.off()
 ```
 
+### Wald Direct Comparisons 
+
+```{r}
+dds_wald <- DESeqDataSetFromMatrix(countData = cnt,
+                                   colData = coldata,
+                                   design = ~Batch+Sample_Group)
+
+
+dds_wald <- DESeq(dds_wald, test = "Wald")
+```
+
+```{r}
+res_PMA_CAvsWT <- DESeq2::results(dds_wald, contrast=c("Sample_Group","CA_PMA_2H","WT_PMA_2H"), alpha = 0.05)
+summary(res_PMA_CAvsWT)
+
+PMA_CAvsWT_list<-data.frame(gene = rownames(res_PMA_CAvsWT), res_PMA_CAvsWT, stringsAsFactors = F) %>% 
+  na.omit() %>% 
+  dplyr::select("log2FoldChange", "padj") %>% 
+  tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
+  dplyr::mutate(padj = case_when(padj == 0 ~ .Machine$double.xmin,
+                                TRUE ~ padj), 
+                signed_padj = sign(log2FoldChange)*-log10(padj),
+                minuslogp = -log10(padj)) %>%
+  merge(genemap, by="ensembl_gene_id_version") %>%
+  dplyr::arrange(desc(signed_padj)) 
+
+PMA_CAvsWT_pos <- subset(PMA_CAvsWT_list, signed_padj > 0) %>%
+  arrange(signed_padj, abs(log2FoldChange)) %>%
+  mutate(rank = row_number()) %>%
+  arrange(desc(rank))
+
+PMA_CAvsWT_neg <- subset(PMA_CAvsWT_list, signed_padj < 0) %>%
+  arrange(desc(signed_padj), abs(log2FoldChange)) %>%
+  mutate(rank = -row_number()) %>%
+  arrange(desc(rank))
+
+PMA_CAvsWT_list <- bind_rows(PMA_CAvsWT_pos, PMA_CAvsWT_neg) %>% dplyr::arrange(desc(rank))
+
+write.xlsx(PMA_CAvsWT_list, "PMAdataset/PMA_CAvsWT.xlsx")
+```
+
+```{r}
+res_PMATNF_CAvsWT <- DESeq2::results(dds_wald, contrast=c("Sample_Group","CA_PMA_2H_TNF_1H","WT_PMA_2H_TNF_1H"), alpha = 0.05)
+summary(res_PMATNF_CAvsWT)
+
+PMATNF_CAvsWT_list<-data.frame(gene = rownames(res_PMATNF_CAvsWT), res_PMATNF_CAvsWT, stringsAsFactors = F) %>% 
+  na.omit() %>% 
+  dplyr::select("log2FoldChange", "padj") %>% 
+  tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
+  dplyr::mutate(padj = case_when(padj == 0 ~ .Machine$double.xmin,
+                                TRUE ~ padj), 
+                signed_padj = sign(log2FoldChange)*-log10(padj),
+                minuslogp = -log10(padj)) %>%
+  merge(genemap, by="ensembl_gene_id_version") %>%
+  dplyr::arrange(desc(signed_padj)) 
+
+PMATNF_CAvsWT_pos <- subset(PMATNF_CAvsWT_list, signed_padj > 0) %>%
+  arrange(signed_padj, abs(log2FoldChange)) %>%
+  mutate(rank = row_number()) %>%
+  arrange(desc(rank))
+
+PMATNF_CAvsWT_neg <- subset(PMATNF_CAvsWT_list, signed_padj < 0) %>%
+  arrange(desc(signed_padj), abs(log2FoldChange)) %>%
+  mutate(rank = -row_number()) %>%
+  arrange(desc(rank))
+
+PMATNF_CAvsWT_list <- bind_rows(PMATNF_CAvsWT_pos, PMATNF_CAvsWT_neg) %>% dplyr::arrange(desc(rank))
+
+write.xlsx(PMATNF_CAvsWT_list, "PMAdataset/PMATNF_CAvsWT.xlsx")
+```
 
 ### VOLCANO PLOTS ###
 
 ```{r}
-pdf(file="PMAdataset/Volcano_PMATNF_CAvsWT.pdf", width=6, height=6)
-ggplot(PMATNF_CAvsWT_list, aes(x=log2FoldChange, y=(minuslogp)))+
+# CA:PMA TREATMENT INTERACTION
+pdf(file="PMAdataset/VolcanoPlots/Volcano_CAPMAtreatment_Interaction.pdf", width=6, height=6)
+ggplot(CAPMAtreatment_list, aes(x=log2FoldChange, y=(minuslogp)))+
   geom_point(size=2.25,color="grey", alpha=0.3)+
-  geom_point(data=subset(PMATNF_CAvsWT_list, log2FoldChange < -0.5 & minuslogp > 50), size=3,color="darkred", alpha=0.6)+
+  geom_point(data=subset(CAPMAtreatment_list, log2FoldChange < -0.3 & minuslogp > 30), size=3,color="darkred", alpha=0.6)+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
         panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
-  xlab("Log2FoldChange")+
+  xlab("Effect Size")+
   theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
   ylab("-log10(p-adj)")+
   theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
-  geom_text_repel(data=subset(PMATNF_CAvsWT_list, log2FoldChange < -0.5 & minuslogp > 50), aes(label=unique_gene_id),
+  geom_text_repel(data=subset(CAPMAtreatment_list, log2FoldChange < -0.3 & minuslogp > 30), aes(label=unique_gene_id),
                   size=4,
                   color="black",
-                  nudge_y = 1,
-                  force=10,
+                  nudge_y = 5,
+                  force=20,
+                  min.segment.length = 0,
+                  max.overlaps = Inf)+
+  scale_y_continuous(breaks = seq(0,110,by=10), limits = c(0,110))+
+  scale_x_continuous(breaks = seq(-2.25,2.25,by=0.5), limits = c(-2.25,2.25))
+dev.off()
+```
+
+```{r}
+# CA:PMATNF TREATMENT INTERACTION
+pdf(file="PMAdataset/VolcanoPlots/Volcano_CAPMAtreatment_Interaction.pdf", width=6, height=6)
+ggplot(CAPMATNFtreatment_list, aes(x=log2FoldChange, y=(minuslogp)))+
+  geom_point(size=2.25,color="grey", alpha=0.3)+
+  geom_point(data=subset(CAPMATNFtreatment_list, log2FoldChange < -0.3 & minuslogp > 30), size=3,color="darkred", alpha=0.6)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
+  xlab("Effect Size")+
+  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
+  ylab("-log10(p-adj)")+
+  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
+  geom_text_repel(data=subset(CAPMATNFtreatment_list, log2FoldChange < -0.3 & minuslogp > 30), aes(label=unique_gene_id),
+                  size=4,
+                  color="black",
+                  nudge_y = 5,
+                  force=20,
+                  min.segment.length = 0,
+                  max.overlaps = Inf)+
+  scale_y_continuous(breaks = seq(0,110,by=10), limits = c(0,110))+
+  scale_x_continuous(breaks = seq(-2.25,2.25,by=0.5), limits = c(-2.25,2.25))
+dev.off()
+```
+
+```{r}
+# PMA treated CA vs WT
+pdf(file="PMAdataset/VolcanoPlots/Volcano_PMA_CAvsWT.pdf", width=6, height=6)
+ggplot(PMA_CAvsWT_list, aes(x=log2FoldChange, y=(minuslogp)))+
+  geom_point(size=2.25,color="grey", alpha=0.3)+
+  geom_point(data=subset(PMA_CAvsWT_list, log2FoldChange < -0.5 & minuslogp > 120), size=3,color="darkred", alpha=0.6)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
+  xlab("Effect Size")+
+  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
+  ylab("-log10(p-adj)")+
+  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
+  geom_text_repel(data=subset(PMA_CAvsWT_list, log2FoldChange < -0.5 & minuslogp > 120), aes(label=unique_gene_id),
+                  size=4,
+                  color="black",
+                  nudge_y = -5,
+                  force=20,
+                  min.segment.length = 0,
+                  max.overlaps = Inf)+
+  scale_y_continuous(breaks = seq(0,320,by=40), limits = c(0,310))+
+  scale_x_continuous(breaks = seq(-3,3,by=0.5), limits = c(-3,3))
+dev.off()
+```
+
+```{r}
+# PMA+TNF treated CA vs WT
+pdf(file="PMAdataset/VolcanoPlots/Volcano_PMATNF_CAvsWT.pdf", width=6, height=6)
+ggplot(PMATNF_CAvsWT_list, aes(x=log2FoldChange, y=(minuslogp)))+
+  geom_point(size=2.25,color="grey", alpha=0.3)+
+  geom_point(data=subset(PMATNF_CAvsWT_list, log2FoldChange < -0.5 & minuslogp > 100), size=3,color="darkred", alpha=0.6)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
+  xlab("Effect Size")+
+  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
+  ylab("-log10(p-adj)")+
+  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
+  geom_text_repel(data=subset(PMATNF_CAvsWT_list, log2FoldChange < -0.5 & minuslogp > 100), aes(label=unique_gene_id),
+                  size=4,
+                  color="black",
+                  nudge_y = -5,
+                  force=20,
                   min.segment.length = 0,
                   max.overlaps = Inf)+
   scale_y_continuous(breaks = seq(0,250,by=25), limits = c(0,250))+
-  scale_x_continuous(breaks = seq(-3,3,by=1), limits = c(-3.2,3.2))
+  scale_x_continuous(breaks = seq(-3.2,3.2,by=0.4), limits = c(-3.2,3.2))
 dev.off()
 ```
 
 ### GSEA VISUALIZATIONS ###
 
 ```{r}
-geneSetID_PMATNF_CAvsWT = match(unique(reactome_genesets_subset$gs_name), 
-                                reac_enrich_PMATNF_CAvsWT_GSEAobject@result[["ID"]])
-
-pdf("PMAdataset/GSEA/gseaplot2_PMATNF_CAvsWT.pdf", width=9, height=6)
-gseaplot2(reac_enrich_PMATNF_CAvsWT_GSEAobject, geneSetID = geneSetID_PMATNF_CAvsWT[!is.na(geneSetID_PMATNF_CAvsWT)], 
-          pvalue_table = FALSE, 
-          title="TNFR2 Non-Canonical NFKB Pathway Enrichment",
-          base_size = 16,
-          rel_heights = c(2,0.3,0.5))
-dev.off()
+# geneSetID_PMATNF_CAvsWT = match(unique(reactome_genesets_subset$gs_name), 
+#                                 reac_enrich_PMATNF_CAvsWT_GSEAobject@result[["ID"]])
+# 
+# pdf("PMAdataset/GSEA/gseaplot2_PMATNF_CAvsWT.pdf", width=9, height=6)
+# gseaplot2(reac_enrich_PMATNF_CAvsWT_GSEAobject, geneSetID = geneSetID_PMATNF_CAvsWT[!is.na(geneSetID_PMATNF_CAvsWT)], 
+#           pvalue_table = FALSE, 
+#           title="TNFR2 Non-Canonical NFKB Pathway Enrichment",
+#           base_size = 16,
+#           rel_heights = c(2,0.3,0.5))
+# dev.off()
 ```

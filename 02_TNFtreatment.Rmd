@@ -23,6 +23,8 @@ library(stringr)
 library(biomaRt)
 library(msigdbr)
 library(ReactomePA)
+library(coin)
+library(glmGamPoi)
 ```
 
 ```{r}
@@ -70,7 +72,25 @@ coldata <- coldata %>%
   dplyr::arrange(desc(Sample_Group)) %>%
   dplyr::group_by(Sample_Group) %>%
   dplyr::arrange(Sample_ID) %>%
-  dplyr::ungroup()
+  dplyr::ungroup() %>%
+  dplyr::mutate(
+    Genotype =
+    case_when(Sample_Group %in% c("WT_TNF_UT", "WT_TNF_1H") ~ "WT",
+              Sample_Group %in% c("EA_TNF_UT", "EA_TNF_1H") ~ "EA",
+              Sample_Group %in% c("CAEA_TNF_UT", "CAEA_TNF_1H") ~ "CAEA",
+              TRUE ~ "other"),
+    Treatment =
+    case_when(Sample_Group %in% c("WT_TNF_1H", "EA_TNF_1H", "CAEA_TNF_1H") ~ "TNF",
+              Sample_Group %in% c("WT_TNF_UT", "EA_TNF_UT", "CAEA_TNF_UT") ~ "UT",
+              TRUE ~ "other"),
+    MutEA =
+    case_when(Sample_Group %in% c("EA_TNF_1H", "EA_TNF_UT", "CAEA_TNF_1H", "CAEA_TNF_UT") ~ "EAmut",
+              Sample_Group %in% c("WT_TNF_UT", "WT_TNF_1H") ~ "EAwt",
+              TRUE ~ "other"),
+    MutCA =
+    case_when(Sample_Group %in% c("CAEA_TNF_1H", "CAEA_TNF_UT") ~ "CAmut",
+              Sample_Group %in% c("WT_TNF_UT", "WT_TNF_1H", "EA_TNF_UT", "EA_TNF_1H") ~ "CAwt",
+              TRUE ~ "other"),)
 
 rownames(coldata) <- coldata$Sample_ID
 
@@ -86,11 +106,27 @@ all(rownames(coldata) == colnames(cnt))
 ```{r}
 #Add the batch information as a confounder in the design parameter. This will account for the batch effect while calculating the differential expression analysis stats but won't normalize/transform the counts for the batch effect. We will do this later below.
 dds <- DESeqDataSetFromMatrix(countData = cnt,
-                              colData = coldata,
-                              design = ~Batch+Sample_Group)
-dds<- DESeq(dds)
-```
+                                   colData = coldata,
+                                   design = ~Batch+Treatment+Genotype+Genotype:Treatment)
+dds_direct <- DESeqDataSetFromMatrix(countData = cnt,
+                                   colData = coldata,
+                                   design = ~Batch+Sample_Group)
 
+dds$Genotype<-relevel(dds$Genotype,ref="WT")
+dds$Treatment<-relevel(dds$Treatment,ref="UT")
+
+dds <- DESeq(dds, test = "Wald")
+dds_direct <- DESeq(dds_direct, test = "Wald")
+
+# OTHER POSSIBLE TESTS:
+# dds_tnf <- DESeq(dds_main, test = "LRT", reduced = ~Batch+MutEA+MutCA)
+# dds_ea <- DESeq(dds_main, test = "LRT", reduced = ~Batch+Treatment+MutCA+MutCA:Treatment)
+# dds_ca <- DESeq(dds_main, test = "LRT", reduced = ~Batch+Treatment+MutEA+MutEA:Treatment)
+# dds_ea_tnf <- DESeq(dds_main, test = "LRT", reduced = ~Batch+Treatment+MutEA+MutCA+MutCA:Treatment)
+# dds_ca_tnf <- DESeq(dds_main, test = "LRT", reduced = ~Batch+Treatment+MutEA+MutCA+MutEA:Treatment)
+#dds_genotype <- DESeq(dds_main2, test = "LRT", reduced = ~Batch+Treatment+Genotype)
+
+```
 ```{r}
 #Apply variance stabilizing transformation on the counts
 vsd <- vst(dds, blind=FALSE)
@@ -113,7 +149,13 @@ ggplot(pcaData, aes(PC1, PC2, color=Sample_Group)) +
   theme(axis.title = element_text(size = 20))+
   ggtitle("PCA With Batch Effect (TNF Dataset - Sample Groups)") +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line(), plot.title = element_text(size=20))
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line(), plot.title = element_text(size=20))+
+   scale_color_manual(values=c("WT_TNF_UT" = "#B0B0B0",
+                  "WT_TNF_1H" = "#696969",
+                  "EA_TNF_UT" = "#ADD8E6",
+                  "EA_TNF_1H" = "#4682B4",
+                  "CAEA_TNF_UT" = "#DDA0DD",
+                  "CAEA_TNF_1H" = "#800080"))
 dev.off()
 
 pdf(file="TNFdataset/PCA_vst_WithBatchEffect_Batches_TNFdataset.pdf", height=5, width=9)
@@ -157,7 +199,13 @@ ggplot(pcaData, aes(PC1, PC2, color=Sample_Group)) +
   theme(axis.title = element_text(size = 20))+
   ggtitle("PCA Without Batch Effect (TNF Dataset - Sample Groups)") +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line(), plot.title = element_text(size=20))
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line(), plot.title = element_text(size=20))+
+   scale_color_manual(values=c("WT_TNF_UT" = "#B0B0B0",
+                  "WT_TNF_1H" = "#696969",
+                  "EA_TNF_UT" = "#ADD8E6",
+                  "EA_TNF_1H" = "#4682B4",
+                  "CAEA_TNF_UT" = "#DDA0DD",
+                  "CAEA_TNF_1H" = "#800080"))
 dev.off()
 
 pdf(file="TNFdataset/PCA_vst_BatchRemoved_Batches_TNFdataset.pdf", height=5, width=9)
@@ -172,12 +220,13 @@ ggplot(pcaData, aes(PC1, PC2, color=Batch)) +
         panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line(), plot.title = element_text(size=20))
 dev.off()
 ```
+### TNF Main Effect
 
 ```{r}
-res_wt_TNFvsUT <- DESeq2::results(dds, contrast=c("Sample_Group","WT_TNF_1H","WT_TNF_UT"), alpha = 0.05)
-summary(res_wt_TNFvsUT)
+res_TNFvsUT <- DESeq2::results(dds, contrast=c("Treatment","TNF","UT"), alpha = 0.05)
+summary(res_TNFvsUT)
 
-wt_TNFvsUT_list<-data.frame(gene = rownames(res_wt_TNFvsUT), res_wt_TNFvsUT, stringsAsFactors = F) %>% 
+TNFvsUT_list<-data.frame(gene = rownames(res_TNFvsUT), res_TNFvsUT, stringsAsFactors = F) %>% 
   na.omit() %>% 
   dplyr::select("log2FoldChange", "padj") %>% 
   tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
@@ -188,26 +237,27 @@ wt_TNFvsUT_list<-data.frame(gene = rownames(res_wt_TNFvsUT), res_wt_TNFvsUT, str
   merge(genemap, by="ensembl_gene_id_version") %>%
   dplyr::arrange(desc(signed_padj)) 
 
-wt_TNFvsUT_pos <- subset(wt_TNFvsUT_list, signed_padj > 0) %>%
+TNFvsUT_pos <- subset(TNFvsUT_list, signed_padj > 0) %>%
   arrange(signed_padj, abs(log2FoldChange)) %>%
   mutate(rank = row_number()) %>%
   arrange(desc(rank))
 
-wt_TNFvsUT_neg <- subset(wt_TNFvsUT_list, signed_padj < 0) %>%
+TNFvsUT_neg <- subset(TNFvsUT_list, signed_padj < 0) %>%
   arrange(desc(signed_padj), abs(log2FoldChange)) %>%
   mutate(rank = -row_number()) %>%
   arrange(desc(rank))
 
-wt_TNFvsUT_list <- bind_rows(wt_TNFvsUT_pos, wt_TNFvsUT_neg) %>% dplyr::arrange(desc(rank))
+TNFvsUT_list <- bind_rows(TNFvsUT_pos, TNFvsUT_neg) %>% dplyr::arrange(desc(rank))
 
-write.xlsx(wt_TNFvsUT_list, "TNFdataset/wt_TNFvsUT.xlsx")
+write.xlsx(TNFvsUT_list, "TNFdataset/TNFvsUT.xlsx")
 ```
+### Mutation Main Effect
 
 ```{r}
-res_ea_TNFvsUT <- DESeq2::results(dds, contrast=c("Sample_Group","EA_TNF_1H","EA_TNF_UT"), alpha = 0.05)
-summary(res_ea_TNFvsUT)
+res_EAvsWT <- DESeq2::results(dds, contrast=c("Genotype","EA","WT"), alpha = 0.05)
+summary(res_EAvsWT)
 
-ea_TNFvsUT_list<-data.frame(gene = rownames(res_ea_TNFvsUT), res_ea_TNFvsUT, stringsAsFactors = F) %>% 
+EAvsWT_list<-data.frame(gene = rownames(res_EAvsWT), res_EAvsWT, stringsAsFactors = F) %>% 
   na.omit() %>% 
   dplyr::select("log2FoldChange", "padj") %>% 
   tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
@@ -218,25 +268,26 @@ ea_TNFvsUT_list<-data.frame(gene = rownames(res_ea_TNFvsUT), res_ea_TNFvsUT, str
   merge(genemap, by="ensembl_gene_id_version") %>%
   dplyr::arrange(desc(signed_padj)) 
 
-ea_TNFvsUT_pos <- subset(ea_TNFvsUT_list, signed_padj > 0) %>%
+EAvsWT_pos <- subset(EAvsWT_list, signed_padj > 0) %>%
   arrange(signed_padj, abs(log2FoldChange)) %>%
   mutate(rank = row_number()) %>%
   arrange(desc(rank))
 
-ea_TNFvsUT_neg <- subset(ea_TNFvsUT_list, signed_padj < 0) %>%
+EAvsWT_neg <- subset(EAvsWT_list, signed_padj < 0) %>%
   arrange(desc(signed_padj), abs(log2FoldChange)) %>%
   mutate(rank = -row_number()) %>%
   arrange(desc(rank))
 
-ea_TNFvsUT_list <- bind_rows(ea_TNFvsUT_pos, ea_TNFvsUT_neg) %>% dplyr::arrange(desc(rank))
+EAvsWT_list <- bind_rows(EAvsWT_pos, EAvsWT_neg) %>% dplyr::arrange(desc(rank))
 
-write.xlsx(ea_TNFvsUT_list, "TNFdataset/ea_TNFvsUT.xlsx")
+write.xlsx(EAvsWT_list, "TNFdataset/EAvsWT.xlsx")
 ```
-```{r}
-res_caea_TNFvsUT <- DESeq2::results(dds, contrast=c("Sample_Group","CAEA_TNF_1H","CAEA_TNF_UT"), alpha = 0.05)
-summary(res_caea_TNFvsUT)
 
-caea_TNFvsUT_list<-data.frame(gene = rownames(res_caea_TNFvsUT), res_caea_TNFvsUT, stringsAsFactors = F) %>% 
+```{r}
+res_CAEAvsWT <- DESeq2::results(dds, contrast=c("Genotype","CAEA","WT"), alpha = 0.05)
+summary(res_CAEAvsWT)
+
+CAEAvsWT_list<-data.frame(gene = rownames(res_CAEAvsWT), res_CAEAvsWT, stringsAsFactors = F) %>% 
   na.omit() %>% 
   dplyr::select("log2FoldChange", "padj") %>% 
   tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
@@ -247,35 +298,711 @@ caea_TNFvsUT_list<-data.frame(gene = rownames(res_caea_TNFvsUT), res_caea_TNFvsU
   merge(genemap, by="ensembl_gene_id_version") %>%
   dplyr::arrange(desc(signed_padj)) 
 
-caea_TNFvsUT_pos <- subset(caea_TNFvsUT_list, signed_padj > 0) %>%
+CAEAvsWT_pos <- subset(CAEAvsWT_list, signed_padj > 0) %>%
   arrange(signed_padj, abs(log2FoldChange)) %>%
   mutate(rank = row_number()) %>%
   arrange(desc(rank))
 
-caea_TNFvsUT_neg <- subset(caea_TNFvsUT_list, signed_padj < 0) %>%
+CAEAvsWT_neg <- subset(CAEAvsWT_list, signed_padj < 0) %>%
   arrange(desc(signed_padj), abs(log2FoldChange)) %>%
   mutate(rank = -row_number()) %>%
   arrange(desc(rank))
 
-caea_TNFvsUT_list <- bind_rows(caea_TNFvsUT_pos, caea_TNFvsUT_neg) %>% dplyr::arrange(desc(rank))
+CAEAvsWT_list <- bind_rows(CAEAvsWT_pos, CAEAvsWT_neg) %>% dplyr::arrange(desc(rank))
 
-write.xlsx(caea_TNFvsUT_list, "TNFdataset/caea_TNFvsUT.xlsx")
+write.xlsx(CAEAvsWT_list, "TNFdataset/CAEAvsWT.xlsx")
 ```
+
+```{r}
+res_CAEAvsEA <- DESeq2::results(dds, contrast=c("Genotype","CAEA","EA"), alpha = 0.05)
+summary(res_CAEAvsEA)
+
+CAEAvsEA_list<-data.frame(gene = rownames(res_CAEAvsEA), res_CAEAvsEA, stringsAsFactors = F) %>% 
+  na.omit() %>% 
+  dplyr::select("log2FoldChange", "padj") %>% 
+  tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
+  dplyr::mutate(padj = case_when(padj == 0 ~ .Machine$double.xmin,
+                                TRUE ~ padj), 
+                signed_padj = sign(log2FoldChange)*-log10(padj),
+                minuslogp = -log10(padj)) %>%
+  merge(genemap, by="ensembl_gene_id_version") %>%
+  dplyr::arrange(desc(signed_padj)) 
+
+CAEAvsEA_pos <- subset(CAEAvsEA_list, signed_padj > 0) %>%
+  arrange(signed_padj, abs(log2FoldChange)) %>%
+  mutate(rank = row_number()) %>%
+  arrange(desc(rank))
+
+CAEAvsEA_neg <- subset(CAEAvsEA_list, signed_padj < 0) %>%
+  arrange(desc(signed_padj), abs(log2FoldChange)) %>%
+  mutate(rank = -row_number()) %>%
+  arrange(desc(rank))
+
+CAEAvsEA_list <- bind_rows(CAEAvsEA_pos, CAEAvsEA_neg) %>% dplyr::arrange(desc(rank))
+
+write.xlsx(CAEAvsEA_list, "TNFdataset/CAEAvsEA.xlsx")
+```
+
+### Interaction Effects
+
+```{r}
+res_EATNF <- DESeq2::results(dds, name="TreatmentTNF.GenotypeEA", alpha = 0.05)
+summary(res_EATNF)
+
+EATNF_list<-data.frame(gene = rownames(res_EATNF), res_EATNF, stringsAsFactors = F) %>% 
+  na.omit() %>% 
+  dplyr::select("log2FoldChange", "padj", "pvalue") %>% 
+  tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
+  dplyr::mutate(padj = case_when(padj == 0 ~ .Machine$double.xmin,
+                                TRUE ~ padj), 
+                signed_padj = sign(log2FoldChange)*-log10(padj),
+                signed_p = sign(log2FoldChange)*-log10(pvalue),
+                minuslogp = -log10(padj)) %>%
+  merge(genemap, by="ensembl_gene_id_version") %>%
+  dplyr::arrange(desc(signed_p)) 
+
+EATNF_pos <- subset(EATNF_list, signed_padj > 0) %>%
+  arrange(signed_p, abs(log2FoldChange)) %>%
+  mutate(rank = row_number()) %>%
+  arrange(desc(rank))
+
+EATNF_neg <- subset(EATNF_list, signed_padj < 0) %>%
+  arrange(desc(signed_p), abs(log2FoldChange)) %>%
+  mutate(rank = -row_number()) %>%
+  arrange(desc(rank))
+
+EATNF_list <- bind_rows(EATNF_pos, EATNF_neg) %>% dplyr::arrange(desc(rank))
+
+write.xlsx(EATNF_list, "TNFdataset/EATNF.xlsx")
+```
+```{r}
+res_CAEATNF <- DESeq2::results(dds, name="TreatmentTNF.GenotypeCAEA", alpha = 0.05)
+summary(res_CAEATNF)
+
+CAEATNF_list<-data.frame(gene = rownames(res_CAEATNF), res_CAEATNF, stringsAsFactors = F) %>% 
+  na.omit() %>% 
+  dplyr::select("log2FoldChange", "padj", "pvalue") %>% 
+  tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
+  dplyr::mutate(padj = case_when(padj == 0 ~ .Machine$double.xmin,
+                                TRUE ~ padj), 
+                signed_padj = sign(log2FoldChange)*-log10(padj),
+                signed_p = sign(log2FoldChange)*-log10(pvalue),
+                minuslogp = -log10(padj)) %>%
+  merge(genemap, by="ensembl_gene_id_version") %>%
+  dplyr::arrange(desc(signed_padj)) 
+
+CAEATNF_pos <- subset(CAEATNF_list, signed_padj > 0) %>%
+  arrange(signed_p, abs(log2FoldChange)) %>%
+  mutate(rank = row_number()) %>%
+  arrange(desc(rank))
+
+CAEATNF_neg <- subset(CAEATNF_list, signed_padj < 0) %>%
+  arrange(desc(signed_p), abs(log2FoldChange)) %>%
+  mutate(rank = -row_number()) %>%
+  arrange(desc(rank))
+
+CAEATNF_list <- bind_rows(CAEATNF_pos, CAEATNF_neg) %>% dplyr::arrange(desc(rank))
+
+write.xlsx(CAEATNF_list, "TNFdataset/CAEATNF.xlsx")
+```
+### Direct Comparisons
+
+```{r}
+res_WT_TNFvsUT <- DESeq2::results(dds_direct, contrast=c("Sample_Group","WT_TNF_1H","WT_TNF_UT"), alpha = 0.05)
+summary(res_WT_TNFvsUT)
+
+WT_TNFvsUT_list<-data.frame(gene = rownames(res_WT_TNFvsUT), res_WT_TNFvsUT, stringsAsFactors = F) %>% 
+  na.omit() %>% 
+  dplyr::select("log2FoldChange", "padj") %>% 
+  tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
+  dplyr::mutate(padj = case_when(padj == 0 ~ .Machine$double.xmin,
+                                TRUE ~ padj), 
+                signed_padj = sign(log2FoldChange)*-log10(padj),
+                minuslogp = -log10(padj)) %>%
+  merge(genemap, by="ensembl_gene_id_version") %>%
+  dplyr::arrange(desc(signed_padj)) 
+
+WT_TNFvsUT_pos <- subset(WT_TNFvsUT_list, signed_padj > 0) %>%
+  arrange(signed_padj, abs(log2FoldChange)) %>%
+  mutate(rank = row_number()) %>%
+  arrange(desc(rank))
+
+WT_TNFvsUT_neg <- subset(WT_TNFvsUT_list, signed_padj < 0) %>%
+  arrange(desc(signed_padj), abs(log2FoldChange)) %>%
+  mutate(rank = -row_number()) %>%
+  arrange(desc(rank))
+
+WT_TNFvsUT_list <- bind_rows(WT_TNFvsUT_pos, WT_TNFvsUT_neg) %>% dplyr::arrange(desc(rank))
+
+write.xlsx(WT_TNFvsUT_list, "TNFdataset/WT_TNFvsUT.xlsx")
+```
+
+```{r}
+res_EA_TNFvsUT <- DESeq2::results(dds_direct, contrast=c("Sample_Group","EA_TNF_1H","EA_TNF_UT"), alpha = 0.05)
+summary(res_EA_TNFvsUT)
+
+EA_TNFvsUT_list<-data.frame(gene = rownames(res_EA_TNFvsUT), res_EA_TNFvsUT, stringsAsFactors = F) %>% 
+  na.omit() %>% 
+  dplyr::select("log2FoldChange", "padj") %>% 
+  tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
+  dplyr::mutate(padj = case_when(padj == 0 ~ .Machine$double.xmin,
+                                TRUE ~ padj), 
+                signed_padj = sign(log2FoldChange)*-log10(padj),
+                minuslogp = -log10(padj)) %>%
+  merge(genemap, by="ensembl_gene_id_version") %>%
+  dplyr::arrange(desc(signed_padj)) 
+
+EA_TNFvsUT_pos <- subset(EA_TNFvsUT_list, signed_padj > 0) %>%
+  arrange(signed_padj, abs(log2FoldChange)) %>%
+  mutate(rank = row_number()) %>%
+  arrange(desc(rank))
+
+EA_TNFvsUT_neg <- subset(EA_TNFvsUT_list, signed_padj < 0) %>%
+  arrange(desc(signed_padj), abs(log2FoldChange)) %>%
+  mutate(rank = -row_number()) %>%
+  arrange(desc(rank))
+
+EA_TNFvsUT_list <- bind_rows(EA_TNFvsUT_pos, EA_TNFvsUT_neg) %>% dplyr::arrange(desc(rank))
+
+write.xlsx(EA_TNFvsUT_list, "TNFdataset/EA_TNFvsUT.xlsx")
+```
+```{r}
+res_CAEA_TNFvsUT <- DESeq2::results(dds_direct, contrast=c("Sample_Group","CAEA_TNF_1H","CAEA_TNF_UT"), alpha = 0.05)
+summary(res_CAEA_TNFvsUT)
+
+CAEA_TNFvsUT_list<-data.frame(gene = rownames(res_CAEA_TNFvsUT), res_CAEA_TNFvsUT, stringsAsFactors = F) %>% 
+  na.omit() %>% 
+  dplyr::select("log2FoldChange", "padj") %>% 
+  tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
+  dplyr::mutate(padj = case_when(padj == 0 ~ .Machine$double.xmin,
+                                TRUE ~ padj), 
+                signed_padj = sign(log2FoldChange)*-log10(padj),
+                minuslogp = -log10(padj)) %>%
+  merge(genemap, by="ensembl_gene_id_version") %>%
+  dplyr::arrange(desc(signed_padj)) 
+
+CAEA_TNFvsUT_pos <- subset(CAEA_TNFvsUT_list, signed_padj > 0) %>%
+  arrange(signed_padj, abs(log2FoldChange)) %>%
+  mutate(rank = row_number()) %>%
+  arrange(desc(rank))
+
+CAEA_TNFvsUT_neg <- subset(CAEA_TNFvsUT_list, signed_padj < 0) %>%
+  arrange(desc(signed_padj), abs(log2FoldChange)) %>%
+  mutate(rank = -row_number()) %>%
+  arrange(desc(rank))
+
+CAEA_TNFvsUT_list <- bind_rows(CAEA_TNFvsUT_pos, CAEA_TNFvsUT_neg) %>% dplyr::arrange(desc(rank))
+
+write.xlsx(CAEA_TNFvsUT_list, "TNFdataset/CAEA_TNFvsUT.xlsx")
+```
+
+```{r}
+res_TNF_EAvsWT <- DESeq2::results(dds_direct, contrast=c("Sample_Group","EA_TNF_1H","WT_TNF_1H"), alpha = 0.05)
+summary(res_TNF_EAvsWT)
+
+TNF_EAvsWT_list<-data.frame(gene = rownames(res_TNF_EAvsWT), res_TNF_EAvsWT, stringsAsFactors = F) %>% 
+  na.omit() %>% 
+  dplyr::select("log2FoldChange", "padj") %>% 
+  tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
+  dplyr::mutate(padj = case_when(padj == 0 ~ .Machine$double.xmin,
+                                TRUE ~ padj), 
+                signed_padj = sign(log2FoldChange)*-log10(padj),
+                minuslogp = -log10(padj)) %>%
+  merge(genemap, by="ensembl_gene_id_version") %>%
+  dplyr::arrange(desc(signed_padj)) 
+
+TNF_EAvsWT_pos <- subset(TNF_EAvsWT_list, signed_padj > 0) %>%
+  arrange(signed_padj, abs(log2FoldChange)) %>%
+  mutate(rank = row_number()) %>%
+  arrange(desc(rank))
+
+TNF_EAvsWT_neg <- subset(TNF_EAvsWT_list, signed_padj < 0) %>%
+  arrange(desc(signed_padj), abs(log2FoldChange)) %>%
+  mutate(rank = -row_number()) %>%
+  arrange(desc(rank))
+
+TNF_EAvsWT_list <- bind_rows(TNF_EAvsWT_pos, TNF_EAvsWT_neg) %>% dplyr::arrange(desc(rank))
+
+write.xlsx(TNF_EAvsWT_list, "TNFdataset/TNF_EAvsWT.xlsx")
+```
+
+```{r}
+res_TNF_CAEAvsWT <- DESeq2::results(dds_direct, contrast=c("Sample_Group","CAEA_TNF_1H","WT_TNF_1H"), alpha = 0.05)
+summary(res_TNF_CAEAvsWT)
+
+TNF_CAEAvsWT_list<-data.frame(gene = rownames(res_TNF_CAEAvsWT), res_TNF_CAEAvsWT, stringsAsFactors = F) %>% 
+  na.omit() %>% 
+  dplyr::select("log2FoldChange", "padj") %>% 
+  tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
+  dplyr::mutate(padj = case_when(padj == 0 ~ .Machine$double.xmin,
+                                TRUE ~ padj), 
+                signed_padj = sign(log2FoldChange)*-log10(padj),
+                minuslogp = -log10(padj)) %>%
+  merge(genemap, by="ensembl_gene_id_version") %>%
+  dplyr::arrange(desc(signed_padj)) 
+
+TNF_CAEAvsWT_pos <- subset(TNF_CAEAvsWT_list, signed_padj > 0) %>%
+  arrange(signed_padj, abs(log2FoldChange)) %>%
+  mutate(rank = row_number()) %>%
+  arrange(desc(rank))
+
+TNF_CAEAvsWT_neg <- subset(TNF_CAEAvsWT_list, signed_padj < 0) %>%
+  arrange(desc(signed_padj), abs(log2FoldChange)) %>%
+  mutate(rank = -row_number()) %>%
+  arrange(desc(rank))
+
+TNF_CAEAvsWT_list <- bind_rows(TNF_CAEAvsWT_pos, TNF_CAEAvsWT_neg) %>% dplyr::arrange(desc(rank))
+
+write.xlsx(TNF_CAEAvsWT_list, "TNFdataset/TNF_CAEAvsWT.xlsx")
+```
+```{r}
+res_TNF_CAEAvsEA <- DESeq2::results(dds_direct, contrast=c("Sample_Group","CAEA_TNF_1H","EA_TNF_1H"), alpha = 0.05)
+summary(res_TNF_CAEAvsEA)
+
+TNF_CAEAvsEA_list<-data.frame(gene = rownames(res_TNF_CAEAvsEA), res_TNF_CAEAvsEA, stringsAsFactors = F) %>% 
+  na.omit() %>% 
+  dplyr::select("log2FoldChange", "padj") %>% 
+  tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
+  dplyr::mutate(padj = case_when(padj == 0 ~ .Machine$double.xmin,
+                                TRUE ~ padj), 
+                signed_padj = sign(log2FoldChange)*-log10(padj),
+                minuslogp = -log10(padj)) %>%
+  merge(genemap, by="ensembl_gene_id_version") %>%
+  dplyr::arrange(desc(signed_padj)) 
+
+TNF_CAEAvsEA_pos <- subset(TNF_CAEAvsEA_list, signed_padj > 0) %>%
+  arrange(signed_padj, abs(log2FoldChange)) %>%
+  mutate(rank = row_number()) %>%
+  arrange(desc(rank))
+
+TNF_CAEAvsEA_neg <- subset(TNF_CAEAvsEA_list, signed_padj < 0) %>%
+  arrange(desc(signed_padj), abs(log2FoldChange)) %>%
+  mutate(rank = -row_number()) %>%
+  arrange(desc(rank))
+
+TNF_CAEAvsEA_list <- bind_rows(TNF_CAEAvsEA_pos, TNF_CAEAvsEA_neg) %>% dplyr::arrange(desc(rank))
+
+write.xlsx(TNF_CAEAvsEA_list, "TNFdataset/TNF_CAEAvsEA.xlsx")
+```
+
+```{r}
+res_UT_EAvsWT <- DESeq2::results(dds_direct, contrast=c("Sample_Group","EA_TNF_UT","WT_TNF_UT"), alpha = 0.05)
+summary(res_UT_EAvsWT)
+
+UT_EAvsWT_list<-data.frame(gene = rownames(res_UT_EAvsWT), res_UT_EAvsWT, stringsAsFactors = F) %>% 
+  na.omit() %>% 
+  dplyr::select("log2FoldChange", "padj") %>% 
+  tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
+  dplyr::mutate(padj = case_when(padj == 0 ~ .Machine$double.xmin,
+                                TRUE ~ padj), 
+                signed_padj = sign(log2FoldChange)*-log10(padj),
+                minuslogp = -log10(padj)) %>%
+  merge(genemap, by="ensembl_gene_id_version") %>%
+  dplyr::arrange(desc(signed_padj)) 
+
+UT_EAvsWT_pos <- subset(UT_EAvsWT_list, signed_padj > 0) %>%
+  arrange(signed_padj, abs(log2FoldChange)) %>%
+  mutate(rank = row_number()) %>%
+  arrange(desc(rank))
+
+UT_EAvsWT_neg <- subset(UT_EAvsWT_list, signed_padj < 0) %>%
+  arrange(desc(signed_padj), abs(log2FoldChange)) %>%
+  mutate(rank = -row_number()) %>%
+  arrange(desc(rank))
+
+UT_EAvsWT_list <- bind_rows(UT_EAvsWT_pos, UT_EAvsWT_neg) %>% dplyr::arrange(desc(rank))
+
+write.xlsx(UT_EAvsWT_list, "TNFdataset/UT_EAvsWT.xlsx")
+```
+```{r}
+res_UT_CAEAvsWT <- DESeq2::results(dds_direct, contrast=c("Sample_Group","CAEA_TNF_UT","WT_TNF_UT"), alpha = 0.05)
+summary(res_UT_CAEAvsWT)
+
+UT_CAEAvsWT_list<-data.frame(gene = rownames(res_UT_CAEAvsWT), res_UT_CAEAvsWT, stringsAsFactors = F) %>% 
+  na.omit() %>% 
+  dplyr::select("log2FoldChange", "padj") %>% 
+  tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
+  dplyr::mutate(padj = case_when(padj == 0 ~ .Machine$double.xmin,
+                                TRUE ~ padj), 
+                signed_padj = sign(log2FoldChange)*-log10(padj),
+                minuslogp = -log10(padj)) %>%
+  merge(genemap, by="ensembl_gene_id_version") %>%
+  dplyr::arrange(desc(signed_padj)) 
+
+UT_CAEAvsWT_pos <- subset(UT_CAEAvsWT_list, signed_padj > 0) %>%
+  arrange(signed_padj, abs(log2FoldChange)) %>%
+  mutate(rank = row_number()) %>%
+  arrange(desc(rank))
+
+UT_CAEAvsWT_neg <- subset(UT_CAEAvsWT_list, signed_padj < 0) %>%
+  arrange(desc(signed_padj), abs(log2FoldChange)) %>%
+  mutate(rank = -row_number()) %>%
+  arrange(desc(rank))
+
+UT_CAEAvsWT_list <- bind_rows(UT_CAEAvsWT_pos, UT_CAEAvsWT_neg) %>% dplyr::arrange(desc(rank))
+
+write.xlsx(UT_CAEAvsWT_list, "TNFdataset/UT_CAEAvsWT.xlsx")
+```
+### Signed Log-padj Plots
+
+```{r}
+upreg_signlog_cutoff = -log10(0.05)
+downreg_signlog_cutoff = log10(0.05)
+significance_p_cutoff = 0.05 
+
+TNF_CAEA_EA_merged <- merge(TNF_CAEAvsWT_list, TNF_EAvsWT_list, by="hgnc_symbol", suffixes = c(".CAEA",".EA"), all=TRUE) %>% 
+  dplyr::mutate(
+    signed_padj.CAEA = case_when(is.na(signed_padj.CAEA) ~ 0,
+                                 TRUE ~ signed_padj.CAEA),
+    signed_padj.EA = case_when(is.na(signed_padj.EA) ~ 0,
+                               TRUE ~ signed_padj.EA),
+    padj.CAEA = case_when(is.na(padj.CAEA) ~ 1,
+                                 TRUE ~ padj.CAEA),
+    padj.EA = case_when(is.na(padj.EA) ~ 1,
+                                 TRUE ~ padj.EA),
+    significance = case_when(signed_padj.EA > upreg_signlog_cutoff & padj.CAEA > significance_p_cutoff ~ "EAup",
+                             signed_padj.EA < downreg_signlog_cutoff & padj.CAEA > significance_p_cutoff ~ "EAdown",
+                             padj.EA > significance_p_cutoff & signed_padj.CAEA > upreg_signlog_cutoff ~ "CAEAup",
+                             padj.EA > significance_p_cutoff & signed_padj.CAEA < downreg_signlog_cutoff ~ "CAEAdown",
+                             signed_padj.EA > upreg_signlog_cutoff & signed_padj.CAEA > upreg_signlog_cutoff ~ "BOTHup",
+                             signed_padj.EA < downreg_signlog_cutoff & signed_padj.CAEA < downreg_signlog_cutoff ~ "BOTHdown",
+                             TRUE ~ NA_character_))
+
+# Prepare data for labeling
+EAup_EAdown_top <- TNF_CAEA_EA_merged %>%
+  filter(significance %in% c("EAup", "EAdown")) %>%
+  arrange(desc(abs(signed_padj.EA))) %>%
+  slice(1:10)
+
+CAEAup_CAEAdown_top <- TNF_CAEA_EA_merged %>%
+  filter(significance %in% c("CAEAup", "CAEAdown")) %>%
+  arrange(desc(abs(signed_padj.CAEA))) %>%
+  slice(1:10)
+
+BOTHup_BOTHdown_top <- TNF_CAEA_EA_merged %>%
+  filter(significance %in% c("BOTHup", "BOTHdown")) %>%
+  mutate(mean_abs_padj = (abs(signed_padj.CAEA) + abs(signed_padj.EA))/2) %>%
+  arrange(desc(mean_abs_padj)) %>%
+  slice(1:10)
+
+
+pdf(file="TNFdataset/signlog/signlog_TNF_CAEA_EA.pdf", width=8, height=8)
+ggplot(TNF_CAEA_EA_merged, aes(x=signed_padj.CAEA, y=signed_padj.EA))+
+  geom_point(color="grey60", alpha=0.6)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
+  geom_point(data=subset(TNF_CAEA_EA_merged, significance %in% c("EAup", "EAdown")),
+                  aes(label=hgnc_symbol),
+                  color="darkred",
+                  alpha=0.2) +
+  geom_point(data=subset(TNF_CAEA_EA_merged, significance %in% c("CAEAup", "CAEAdown")),
+                  aes(label=hgnc_symbol),
+                  color="darkblue", 
+                  alpha=0.2) +
+  geom_point(data=subset(TNF_CAEA_EA_merged, significance %in% c("BOTHup", "BOTHdown")),
+                  aes(label=hgnc_symbol),
+                  color="purple",
+                  alpha=0.2) +
+  geom_text_repel(data = EAup_EAdown_top, aes(label = hgnc_symbol), color = "darkred") +
+  geom_text_repel(data = CAEAup_CAEAdown_top, aes(label = hgnc_symbol), color = "darkblue") +
+  geom_text_repel(data = BOTHup_BOTHdown_top, aes(label = hgnc_symbol), color = "purple", max.overlaps = Inf)
+dev.off()
+
+write.xlsx(TNF_CAEA_EA_merged, "TNFdataset/signlog/TNF_CrossComparison.xlsx")
+```
+
+```{r}
+UT_CAEA_EA_merged <- merge(UT_CAEAvsWT_list, UT_EAvsWT_list, by="hgnc_symbol", suffixes = c(".CAEA",".EA"), all=TRUE) %>% 
+  dplyr::mutate(
+    signed_padj.CAEA = case_when(is.na(signed_padj.CAEA) ~ 0,
+                                 TRUE ~ signed_padj.CAEA),
+    signed_padj.EA = case_when(is.na(signed_padj.EA) ~ 0,
+                               TRUE ~ signed_padj.EA),
+    padj.CAEA = case_when(is.na(padj.CAEA) ~ 1,
+                                 TRUE ~ padj.CAEA),
+    padj.EA = case_when(is.na(padj.EA) ~ 1,
+                                 TRUE ~ padj.EA),
+    significance = case_when(signed_padj.EA > upreg_signlog_cutoff & padj.CAEA > significance_p_cutoff ~ "EAup",
+                             signed_padj.EA < downreg_signlog_cutoff & padj.CAEA > significance_p_cutoff ~ "EAdown",
+                             padj.EA > significance_p_cutoff & signed_padj.CAEA > upreg_signlog_cutoff ~ "CAEAup",
+                             padj.EA > significance_p_cutoff & signed_padj.CAEA < downreg_signlog_cutoff ~ "CAEAdown",
+                             signed_padj.EA > upreg_signlog_cutoff & signed_padj.CAEA > upreg_signlog_cutoff ~ "BOTHup",
+                             signed_padj.EA < downreg_signlog_cutoff & signed_padj.CAEA < downreg_signlog_cutoff ~ "BOTHdown",
+                             TRUE ~ NA_character_))
+
+# Prepare data for labeling
+EAup_EAdown_top <- UT_CAEA_EA_merged %>%
+  filter(significance %in% c("EAup", "EAdown")) %>%
+  arrange(desc(abs(signed_padj.EA))) %>%
+  slice(1:10)
+
+CAEAup_CAEAdown_top <- UT_CAEA_EA_merged %>%
+  filter(significance %in% c("CAEAup", "CAEAdown")) %>%
+  arrange(desc(abs(signed_padj.CAEA))) %>%
+  slice(1:10)
+
+BOTHup_BOTHdown_top <- UT_CAEA_EA_merged %>%
+  filter(significance %in% c("BOTHup", "BOTHdown")) %>%
+  mutate(mean_abs_padj = (abs(signed_padj.CAEA) + abs(signed_padj.EA))/2) %>%
+  arrange(desc(mean_abs_padj)) %>%
+  slice(1:10)
+
+
+pdf(file="TNFdataset/signlog/signlog_UT_CAEA_EA.pdf", width=8, height=8)
+ggplot(UT_CAEA_EA_merged, aes(x=signed_padj.CAEA, y=signed_padj.EA))+
+  geom_point(color="grey60", alpha=0.6)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
+  geom_point(data=subset(UT_CAEA_EA_merged, significance %in% c("EAup", "EAdown")),
+                  aes(label=hgnc_symbol),
+                  color="darkred",
+                  alpha=0.2) +
+  geom_point(data=subset(UT_CAEA_EA_merged, significance %in% c("CAEAup", "CAEAdown")),
+                  aes(label=hgnc_symbol),
+                  color="darkblue", 
+                  alpha=0.2) +
+  geom_point(data=subset(UT_CAEA_EA_merged, significance %in% c("BOTHup", "BOTHdown")),
+                  aes(label=hgnc_symbol),
+                  color="purple",
+                  alpha=0.2) +
+  geom_text_repel(data = EAup_EAdown_top, aes(label = hgnc_symbol), color = "darkred") +
+  geom_text_repel(data = CAEAup_CAEAdown_top, aes(label = hgnc_symbol), color = "darkblue") +
+  geom_text_repel(data = BOTHup_BOTHdown_top, aes(label = hgnc_symbol), color = "purple", max.overlaps = Inf)
+dev.off()
+
+write.xlsx(UT_CAEA_EA_merged, "TNFdataset/signlog/UT_CrossComparison.xlsx")
+```
+
+```{r}
+CAEA_EA_merged <- merge(CAEAvsWT_list, EAvsWT_list, by="hgnc_symbol", suffixes = c(".CAEA",".EA"), all=TRUE) %>% 
+  dplyr::mutate(
+    signed_padj.CAEA = case_when(signed_padj.CAEA == NA ~ 0,
+                                 .default = signed_padj.CAEA),
+    signed_padj.EA = case_when(signed_padj.EA == NA ~ 0,
+                               .default = signed_padj.EA)
+  )
+
+pdf(file="TNFdataset/signlog/signlog_Genotype_CAEA_EA.pdf", width=8, height=8)
+ggplot(CAEA_EA_merged, aes(x=signed_padj.CAEA, y=signed_padj.EA))+
+  geom_point(color="grey60", alpha=0.6)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
+  geom_text_repel(data=subset(CAEA_EA_merged, signed_padj.EA > 10 | 
+                                signed_padj.EA < -12.5 |
+                                signed_padj.CAEA > 50 |
+                                signed_padj.CAEA < -25), 
+                  aes(label=hgnc_symbol),
+                  size=4,
+                  color="black",
+                  nudge_y = 1,
+                  force=10,
+                  min.segment.length = 0,
+                  max.overlaps = Inf)
+dev.off()
+```
+
 ```{r}
 # selected_genes <- unique(intersect(
 #   intersect(subset(wt_TNFvsUT_list, abs(log2FoldChange) >= 0.5 & padj <= 0.05)$ensembl_gene_id_version,
 #             subset(ea_TNFvsUT_list, abs(log2FoldChange) >= 0.5 & padj <= 0.05)$ensembl_gene_id_version),
 #   subset(caea_TNFvsUT_list, abs(log2FoldChange) >= 0.5 & padj <= 0.05)$ensembl_gene_id_version))
 
-tnfUP_signature <- subset(wt_TNFvsUT_list, log2FoldChange >= 0.5 & padj <= 0.001)$ensembl_gene_id_version
+tnfUP_signature <- subset(TNFvsUT_list, padj <= 0.001 & log2FoldChange > log2(1.5))$ensembl_gene_id_version
 saveRDS(tnfUP_signature, "tnfUP_signature.RDS")
+#EAvsWT_list_subset <- subset(EAvsWT_list, padj <= 0.001)$ensembl_gene_id_version
 
-selected_genes <- tnfUP_signature
+#overlap <- intersect(tnfUP_signature, EAvsWT_list_subset)
+#selected_genes <- tnfUP_signature
 ```
 
+### VOLCANO PLOTS ###
 
 ```{r}
-data_heatmap <- subset(vsdMat, rownames(vsdMat) %in% selected_genes)
+# TNF main effect Volcano Plot
+
+pdf(file="TNFdataset/VolcanoPlots/Volcano_TNFvsUT.pdf", width=6, height=6)
+ggplot(TNFvsUT_list, aes(x=log2FoldChange, y=(minuslogp)))+
+  geom_point(size=2,color="grey", alpha=0.3)+
+  geom_point(data=subset(TNFvsUT_list, padj < 0.001), size=2,color="darkred", alpha=0.4)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
+  xlab("log2FoldChange")+
+  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
+  ylab("-log10(p-adj)")+
+  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
+  scale_y_continuous(breaks = seq(0,325,by=25), limits = c(0,325))+
+  scale_x_continuous(breaks = seq(-3,3,by=1), limits = c(-3,4))+
+  geom_text_repel(data=subset(TNFvsUT_list, ensembl_gene_id_version %in% tnfUP_signature), aes(label=unique_gene_id),
+                  size=1.5,
+                  color="black",
+                  max.overlaps = Inf,
+                  segment.color = "grey80")
+dev.off()
+```
+
+```{r}
+# EA vs WT Volcano Plot
+
+pdf(file="TNFdataset/VolcanoPlots/Volcano_EAvsWT.pdf", width=6, height=6)
+ggplot(EAvsWT_list, aes(x=log2FoldChange, y=(minuslogp)))+
+  geom_point(size=2,color="grey", alpha=0.3)+
+  geom_point(data=subset(EAvsWT_list, padj < 0.001), size=2,color="darkred", alpha=0.4)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
+  xlab("log2FoldChange")+
+  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
+  ylab("-log10(p-adj)")+
+  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
+  scale_y_continuous(breaks = seq(0,40,by=5), limits = c(0,40))+
+  scale_x_continuous(breaks = seq(-3.8,2.2,by=0.5), limits = c(-3.8,2.2))+
+  geom_text_repel(data=subset(EAvsWT_list, minuslogp > 12), aes(label=unique_gene_id),
+                  size=4,
+                  color="black",
+                  nudge_y = 1,
+                  force=10,
+                  min.segment.length = 0,
+                  max.overlaps = Inf) +
+  geom_text_repel(data=subset(EAvsWT_list, log2FoldChange < -2), aes(label=unique_gene_id),
+                  size=4,
+                  color="black",
+                  nudge_y = 1,
+                  force=10,
+                  min.segment.length = 0,
+                  max.overlaps = Inf) +
+    geom_text_repel(data=subset(EAvsWT_list, log2FoldChange > 1.5), aes(label=unique_gene_id),
+                  size=4,
+                  color="black",
+                  nudge_y = 1,
+                  force=10,
+                  min.segment.length = 0,
+                  max.overlaps = Inf)
+dev.off()
+```
+
+```{r}
+# CAEA vs WT Volcano Plot
+
+pdf(file="TNFdataset/VolcanoPlots/Volcano_CAEAvsWT.pdf", width=6, height=6)
+ggplot(CAEAvsWT_list, aes(x=log2FoldChange, y=(minuslogp)))+
+  geom_point(size=2,color="grey", alpha=0.3)+
+  geom_point(data=subset(CAEAvsWT_list, padj < 0.001), size=2,color="darkred", alpha=0.4)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
+  xlab("log2FoldChange")+
+  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
+  ylab("-log10(p-adj)")+
+  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
+  scale_y_continuous(breaks = seq(0,135,by=15), limits = c(0,130))+
+  scale_x_continuous(breaks = seq(-5.8,2.2,by=0.5), limits = c(-5.8,2.2))+
+  geom_text_repel(data=subset(CAEAvsWT_list, minuslogp > 50), aes(label=unique_gene_id),
+                  size=4,
+                  color="black",
+                  nudge_y = 1,
+                  force=10,
+                  min.segment.length = 0,
+                  max.overlaps = Inf)
+dev.off()
+```
+
+```{r}
+# EA-TNF interaction effect Volcano Plot
+
+pdf(file="TNFdataset/VolcanoPlots/Volcano_EATNFinteraction.pdf", width=6, height=6)
+ggplot(EATNF_list, aes(x=log2FoldChange, y=(minuslogp)))+
+  geom_point(size=2,color="grey", alpha=0.3)+
+  geom_point(data=subset(EATNF_list, padj < 0.001), size=2,color="darkred", alpha=0.4)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
+  xlab("log2FoldChange")+
+  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
+  ylab("-log10(p-adj)")+
+  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
+  scale_y_continuous(breaks = seq(0,10,by=1), limits = c(0,10))+
+  scale_x_continuous(breaks = seq(-5,5,by=1), limits = c(-5,5))
+dev.off()
+```
+
+```{r}
+# CA-TNF interaction effect Volcano Plot
+
+pdf(file="TNFdataset/VolcanoPlots/Volcano_CATNFinteraction.pdf", width=6, height=6)
+ggplot(CAEATNF_list, aes(x=log2FoldChange, y=(minuslogp)))+
+  geom_point(size=2,color="grey", alpha=0.3)+
+  geom_point(data=subset(CAEATNF_list, padj < 0.001), size=2,color="darkred", alpha=0.6)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
+  xlab("log2FoldChange")+
+  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
+  ylab("-log10(p-adj)")+
+  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
+  scale_y_continuous(breaks = seq(0,10,by=1), limits = c(0,10))+
+  scale_x_continuous(breaks = seq(-5,5,by=1), limits = c(-5,5))
+dev.off()
+```
+
+## Direct Comparison Volcano Plots
+
+```{r}
+# EA mutated TNF treatment vs WT TNF treatment
+
+pdf(file="TNFdataset/VolcanoPlots/Volcano_TNF_EAvsWT.pdf", width=6, height=6)
+ggplot(TNF_EAvsWT_list, aes(x=log2FoldChange, y=(minuslogp)))+
+  geom_point(size=2,color="grey", alpha=0.3)+
+  geom_point(data=subset(TNF_EAvsWT_list, padj<0.001), size=2,color="darkred", alpha=0.4)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
+  xlab("log2FoldChange")+
+  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
+  ylab("-log10(p-adj)")+
+  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
+  scale_y_continuous(breaks = seq(0,50,by=5), limits = c(0,50))+
+  scale_x_continuous(breaks = seq(-1.4,1.4,by=0.4), limits = c(-1.4,1.4))+
+  geom_text_repel(data=subset(TNF_EAvsWT_list, minuslogp > 5 & abs(log2FoldChange) > 0.2), aes(label=unique_gene_id),
+                  size=4,
+                  color="black",
+                  nudge_y = 1,
+                  force=10,
+                  min.segment.length = 0,
+                  max.overlaps = Inf)
+dev.off()
+```
+
+```{r}
+# CAEA mutated TNF treatment vs WT TNF treatment
+
+pdf(file="TNFdataset/VolcanoPlots/Volcano_TNF_CAEAvsWT.pdf", width=6, height=6)
+ggplot(TNF_CAEAvsWT_list, aes(x=log2FoldChange, y=(minuslogp)))+
+  geom_point(size=2,color="grey", alpha=0.3)+
+  geom_point(data=subset(TNF_CAEAvsWT_list, padj < 0.001), size=2,color="darkred", alpha=0.4)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
+  xlab("log2FoldChange")+
+  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
+  ylab("-log10(p-adj)")+
+  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
+  scale_y_continuous(breaks = seq(0,160,by=10), limits = c(0,160))+
+  scale_x_continuous(breaks = seq(-3.2,3.2,by=0.4), limits = c(-3.2,3.2))+
+  geom_text_repel(data=subset(TNF_CAEAvsWT_list, minuslogp > 40), aes(label=unique_gene_id),
+                  size=4,
+                  color="black",
+                  nudge_y = 1,
+                  force=10,
+                  min.segment.length = 0,
+                  max.overlaps = Inf)
+dev.off()
+```
+
+```{r}
+tnf_signature_df <- subset(TNFvsUT_list, ensembl_gene_id_version %in% tnfUP_signature) %>%
+  dplyr::select(-c(rank, n_unique_ensembl_id))
+
+write.xlsx(tnf_signature_df, "tnf_signature.xlsx")
+```
+
+### HEATMAPS
+
+```{r}
+data_heatmap <- subset(vsdMat, rownames(vsdMat) %in% tnfUP_signature)
 
 scaled_data = t(scale(t(data_heatmap)))
 
@@ -291,7 +1018,12 @@ ordered_data <- ordered_data_temp[,coldata$Sample_ID]
 
 group_labels <- factor(coldata$Sample_Group)
 group_labels_unique <- unique(group_labels)
-group_colors <- c("#FF5733", "#33FF57", "#337AFF", "#FF33E9", "#FFD700", "#800080")
+group_colors <- c("WT_TNF_UT" = "#B0B0B0",
+                  "WT_TNF_1H" = "#696969",
+                  "EA_TNF_UT" = "#ADD8E6",
+                  "EA_TNF_1H" = "#4682B4",
+                  "CAEA_TNF_UT" = "#DDA0DD",
+                  "CAEA_TNF_1H" = "#800080")
 names(group_colors) <- group_labels_unique
 
 
@@ -301,443 +1033,288 @@ column_annotation <- HeatmapAnnotation(
   col = list(group = group_colors)
 )
 
+# Calculate the minimum and maximum of the transformed data
+#min_val <- min(ordered_data)
+#max_val <- max(ordered_data)
 
-pdf("TNFdataset/Heatmap_TNFdataset.pdf", width = 6, height = 4)
-Heatmap(ordered_data, 
-        name = "Expression", 
-        show_row_names = TRUE, 
+# Introduce an intermediate value closer to min_val where you want yellow to start appearing more prominently
+# Adjust this value to control how quickly the transition to yellow occurs
+#intermediate_val <- min_val + (max_val - min_val) * 0.25  # Adjust this factor based on your data
+
+#col_fun <- colorRamp2(c(min_val, 0, max_val), c("navyblue", "grey100", "darkred"))
+
+heatmap_colors <- colorRamp2(c(min(ordered_data), 0, max(ordered_data)),
+                             c("#6495ED", "#FFFFFF", "#FF4500"))
+
+ht = Heatmap(ordered_data,
+        name = "Expression",
+        show_row_names = TRUE,
         show_column_names = TRUE,
         cluster_columns = FALSE,
         cluster_rows = TRUE,
+        #col = col_fun,
         row_names_gp = gpar(fontsize = 5),
         top_annotation = column_annotation,
-        column_names_gp = gpar(fontsize = 4))
+        col = heatmap_colors,  # Apply custom colors
+        column_names_gp = gpar(fontsize = 4),
+        use_raster = FALSE)
+
+ht = draw(ht)
+
+pdf("TNFdataset/Heatmap_TNFsignature.pdf", width = 6, height = 4)
+ht
 dev.off()
 ```
 
 ```{r}
-reactome_genesets <- msigdbr(species = "Homo sapiens", 
-                             category = "C2", 
-                             subcategory = "CP:REACTOME") %>% 
+cgp_genesets <- msigdbr(species = "Homo sapiens",
+                             category = "C2",
+                             subcategory = "CGP") %>%
   dplyr::select(gs_name, ensembl_gene) %>% distinct()
 
-go_genesets <- msigdbr(species = "Homo sapiens", 
-                             category = "C5", 
-                             subcategory = "GO:BP") %>% 
-  dplyr::select(gs_name, ensembl_gene) %>% distinct()
+cgp_genesets_subset <- cgp_genesets %>%
+  subset(gs_name %in% c("TIAN_TNF_SIGNALING_VIA_NFKB"))
 
-tft_genesets_legacy <- msigdbr(species = "Homo sapiens", 
-                             category = "C3",
-                             subcategory = "TFT:TFT_Legacy") %>% 
-  dplyr::select(gs_name, ensembl_gene) %>% distinct()
+tnf_signature_gsva_df <- tnf_signature_df %>% dplyr::select(c(ensembl_gene_id)) %>%
+  dplyr::rename("ensembl_gene" = "ensembl_gene_id") %>%
+  dplyr::mutate(gs_name = "TNF_UP_SIGNATURE")
 
-tft_genesets_gtrd <- msigdbr(species = "Homo sapiens", 
-                             category = "C3",
-                             subcategory = "TFT:GTRD") %>% 
-  dplyr::select(gs_name, ensembl_gene) %>% distinct()
-
-tft_genesets <- bind_rows(tft_genesets_legacy, tft_genesets_gtrd)
-
-reactome_genesets_subset <- reactome_genesets %>% 
-  subset(gs_name %in% c("REACTOME_TNFR2_NON_CANONICAL_NF_KB_PATHWAY",
-                        "REACTOME_NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL"))
-
-tft_genesets_subset <- tft_genesets %>% 
-  subset(gs_name %in% c("NFKBIA_TARGET_GENES"))
+gsva_df <- bind_rows(cgp_genesets_subset, tnf_signature_gsva_df)
 ```
 
 ```{r}
-wt_TNFvsUT_ranked<-wt_TNFvsUT_list$rank
-names(wt_TNFvsUT_ranked)<-str_remove(wt_TNFvsUT_list$ensembl_gene_id_version, "\\..*$")
-
-reac_enrich_wt_TNFvsUT_GSEAobject <- GSEA(wt_TNFvsUT_ranked, 
-                                          TERM2GENE = reactome_genesets, 
-                                          eps = 0, 
-                                          pvalueCutoff = 0.25, 
-                                          nPermSimple = 1e4)
-reac_enrich_wt_TNFvsUT_GSEAobject <- setReadable(reac_enrich_wt_TNFvsUT_GSEAobject, 'org.Hs.eg.db', 'ENSEMBL')
-reac_enrich_wt_TNFvsUT <- reac_enrich_wt_TNFvsUT_GSEAobject@result %>%
-  dplyr::mutate(signed_padj = sign(NES)*-log10(p.adjust)) %>%
-  dplyr::arrange(desc(signed_padj))
-
-tft_enrich_wt_TNFvsUT_GSEAobject <- GSEA(wt_TNFvsUT_ranked, 
-                                         TERM2GENE = tft_genesets, 
-                                         eps = 0, 
-                                         pvalueCutoff = 0.25, 
-                                         nPermSimple = 1e4)
-tft_enrich_wt_TNFvsUT_GSEAobject <- setReadable(tft_enrich_wt_TNFvsUT_GSEAobject, 'org.Hs.eg.db', 'ENSEMBL')
-tft_enrich_wt_TNFvsUT <- tft_enrich_wt_TNFvsUT_GSEAobject@result %>%
-  dplyr::mutate(signed_padj = sign(NES)*-log10(p.adjust)) %>%
-  dplyr::arrange(desc(signed_padj))
-
-#saveRDS(reac_enrich_wt_TNFvsUT_GSEAobject, "TNFdataset/GSEA/reac_enrich_wt_TNFvsUT_GSEAobject.RDS")
-#saveRDS(tft_enrich_wt_TNFvsUT_GSEAobject, "TNFdataset/GSEA/tft_enrich_wt_TNFvsUT_GSEAobject.RDS")
-```
-
-```{r}
-ea_TNFvsUT_ranked<-ea_TNFvsUT_list$rank
-names(ea_TNFvsUT_ranked)<-str_remove(ea_TNFvsUT_list$ensembl_gene_id_version, "\\..*$")
-
-reac_enrich_ea_TNFvsUT_GSEAobject <- GSEA(ea_TNFvsUT_ranked,
-                                          TERM2GENE = reactome_genesets, 
-                                          eps = 0, 
-                                          pvalueCutoff = 0.25, 
-                                          nPermSimple = 1e4)
-reac_enrich_ea_TNFvsUT_GSEAobject <- setReadable(reac_enrich_ea_TNFvsUT_GSEAobject, 'org.Hs.eg.db', 'ENSEMBL')
-reac_enrich_ea_TNFvsUT <- reac_enrich_ea_TNFvsUT_GSEAobject@result %>%
-  dplyr::mutate(signed_padj = sign(NES)*-log10(p.adjust)) %>%
-  dplyr::arrange(desc(signed_padj))
-
-tft_enrich_ea_TNFvsUT_GSEAobject <- GSEA(ea_TNFvsUT_ranked, 
-                                         TERM2GENE = tft_genesets, 
-                                         eps = 0, 
-                                         pvalueCutoff = 0.25, 
-                                         nPermSimple = 1e4)
-tft_enrich_ea_TNFvsUT_GSEAobject <- setReadable(tft_enrich_ea_TNFvsUT_GSEAobject, 'org.Hs.eg.db', 'ENSEMBL')
-tft_enrich_ea_TNFvsUT <- tft_enrich_ea_TNFvsUT_GSEAobject@result %>%
-  dplyr::mutate(signed_padj = sign(NES)*-log10(p.adjust)) %>%
-  dplyr::arrange(desc(signed_padj))
-
-#saveRDS(reac_enrich_ea_TNFvsUT_GSEAobject, "TNFdataset/GSEA/reac_enrich_ea_TNFvsUT_GSEAobject.RDS")
-#saveRDS(tft_enrich_ea_TNFvsUT_GSEAobject, "TNFdataset/GSEA/tft_enrich_ea_TNFvsUT_GSEAobject.RDS")
-```
-
-```{r}
-caea_TNFvsUT_ranked<-caea_TNFvsUT_list$rank
-names(caea_TNFvsUT_ranked)<-str_remove(caea_TNFvsUT_list$ensembl_gene_id_version, "\\..*$")
-
-reac_enrich_caea_TNFvsUT_GSEAobject <- GSEA(caea_TNFvsUT_ranked, 
-                                            TERM2GENE = reactome_genesets, 
-                                            eps = 0, 
-                                            pvalueCutoff = 0.25, 
-                                            nPermSimple = 1e4)
-reac_enrich_caea_TNFvsUT_GSEAobject <- setReadable(reac_enrich_caea_TNFvsUT_GSEAobject, 'org.Hs.eg.db', 'ENSEMBL')
-reac_enrich_caea_TNFvsUT <- reac_enrich_caea_TNFvsUT_GSEAobject@result %>%
-  dplyr::mutate(signed_padj = sign(NES)*-log10(p.adjust)) %>%
-  dplyr::arrange(desc(signed_padj))
-
-tft_enrich_caea_TNFvsUT_GSEAobject <- GSEA(caea_TNFvsUT_ranked, 
-                                           TERM2GENE = tft_genesets, 
-                                           eps = 0, 
-                                           pvalueCutoff = 0.25, 
-                                           nPermSimple = 1e4)
-tft_enrich_caea_TNFvsUT_GSEAobject <- setReadable(tft_enrich_caea_TNFvsUT_GSEAobject, 'org.Hs.eg.db', 'ENSEMBL')
-tft_enrich_caea_TNFvsUT <- tft_enrich_caea_TNFvsUT_GSEAobject@result %>%
-  dplyr::mutate(signed_padj = sign(NES)*-log10(p.adjust)) %>%
-  dplyr::arrange(desc(signed_padj))
-
-#saveRDS(reac_enrich_caea_TNFvsUT_GSEAobject, "TNFdataset/GSEA/reac_enrich_caea_TNFvsUT_GSEAobject.RDS")
-#saveRDS(tft_enrich_caea_TNFvsUT_GSEAobject, "TNFdataset/GSEA/tft_enrich_caea_TNFvsUT_GSEAobject.RDS")
-```
-
-```{r}
-reactome_list <- unlist(split(reactome_genesets_subset, 
-                              f = reactome_genesets_subset$gs_name), 
+genesets_list <- unlist(split(gsva_df,
+                              f = gsva_df$gs_name),
                         recursive = F)
 
 vsdMat_ensembl <- vsdMat
 rownames(vsdMat_ensembl) <- str_remove(rownames(vsdMat), "\\..*$")
 
-gsva_object <- gsvaParam(exprData = as.matrix(vsdMat_ensembl), geneSets = reactome_list)
-gsva_res_reactome <- gsva(gsva_object, verbose=FALSE)
+gsva_object <- gsvaParam(exprData = as.matrix(vsdMat_ensembl), geneSets = genesets_list)
+gsva_res <- gsva(gsva_object, verbose=FALSE)
 
-gsva_res_reactome_melted <- reshape2::melt(gsva_res_reactome, 
-                                           varnames=c('GeneSet', 'Sample_ID'),
-                                           value.name = "GSVAscore") %>%
-  dplyr::mutate(GeneSet = str_remove_all(GeneSet, ".gene_symbol"),
-                GeneSet = str_remove_all(GeneSet, "REACTOME_"))
+gsva_res_melted <- reshape2::melt(gsva_res, 
+                                  varnames=c('GeneSet', 'Sample_ID'),
+                                  value.name = "GSVAscore") %>%
+  dplyr::mutate(GeneSet = str_remove_all(GeneSet, ".gene_symbol"))
 
-gsva_res_reactome_merged <- merge(gsva_res_reactome_melted, coldata, by="Sample_ID")
+gsva_res_merged <- merge(gsva_res_melted, coldata, by="Sample_ID")
 
-gsva_res_reactome_merged$Sample_Group <- factor(gsva_res_reactome_merged$Sample_Group, levels =
-                                                                   c("WT_TNF_UT", "WT_TNF_1H", 
+gsva_res_merged$Sample_Group <- factor(gsva_res_merged$Sample_Group, levels =
+                                                                   c("WT_TNF_UT", "WT_TNF_1H",
                                                                      "EA_TNF_UT","EA_TNF_1H",
                                                                      "CAEA_TNF_UT", "CAEA_TNF_1H"))
 
-gsva_res_reactome_merged <- gsva_res_reactome_merged %>% arrange(Sample_Group) %>% dplyr::mutate(GeneSet = str_replace_all(GeneSet, ".ensembl_gene", ""))
+gsva_res_merged <- gsva_res_merged %>% arrange(Sample_Group) %>% dplyr::mutate(GeneSet = str_replace_all(GeneSet, ".ensembl_gene", ""))
 
 # Define group colors
-group_colors <- c("WT_TNF_UT" = "#FF5733",
-                  "WT_TNF_1H" = "#33FF57",
-                  "EA_TNF_UT" = "#337AFF",
-                  "EA_TNF_1H" = "#FF33E9",
-                  "CAEA_TNF_UT" = "#FFD700",
+group_colors <- c("WT_TNF_UT" = "#B0B0B0",
+                  "WT_TNF_1H" = "#696969",
+                  "EA_TNF_UT" = "#ADD8E6",
+                  "EA_TNF_1H" = "#4682B4",
+                  "CAEA_TNF_UT" = "#DDA0DD",
                   "CAEA_TNF_1H" = "#800080")
 
 # Calculate means for each SampleGroup
-median <- gsva_res_reactome_merged %>%
+median <- gsva_res_merged %>%
   group_by(Sample_Group, GeneSet) %>%
   summarize(median_GSVAscore = median(GSVAscore))
 
-pdf("TNFdataset/GSVAexample.pdf", width = 4, height = 8)
-ggplot(gsva_res_reactome_merged, aes(y = GSVAscore, x = Sample_Group, color = Sample_Group)) +
-  geom_boxplot(outlier.shape = NA) +
-  geom_jitter(width = 0.1) +
-  scale_color_manual(values = group_colors) +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
-        strip.text = element_text(size = 4),
-        legend.position = "none") +
-  facet_wrap(~GeneSet, ncol = 1, nrow=2)
+pdf("TNFdataset/GSVA.pdf", width = 3, height = 8)
+ggplot(gsva_res_merged, aes(y = GSVAscore, x = Sample_Group, fill = Sample_Group)) +
+  geom_violin(alpha = 0.5, show.legend = FALSE) +  # Transparent violins and remove legend for fill
+  geom_jitter(width = 0.15, size = 1.5, alpha = 0.6, color = "black") +  # Black jitter points with adjusted size and transparency
+  scale_fill_manual(values = group_colors) +
+  theme_minimal(base_size = 12) +  # Increase base font size for better readability
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),  # Adjust x-axis text size
+    axis.title.x = element_text(size = 14),  # Add and adjust x-axis title
+    axis.title.y = element_text(size = 14),  # Add and adjust y-axis title
+    strip.text = element_text(size = 8),  # Adjust facet label size
+    legend.position = "none",  # Remove legend
+    panel.spacing = unit(1, "lines")  # Increase spacing between facets
+  ) +
+  labs(
+    x = "Sample Group",  # Add x-axis label
+    y = "GSVA Score",  # Add y-axis label
+  ) +
+  facet_wrap(~GeneSet, ncol = 1, nrow = 2)  # Adjust number of rows and columns in facet
 dev.off()
 ```
-
 ```{r}
-# Wilcoxon test for GSVA (NFKB Survival Pathway)
-wt_TNF_survival <- subset(gsva_res_reactome_merged, Sample_Group == "WT_TNF_1H" & 
-                            GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
-wt_UT_survival <- subset(gsva_res_reactome_merged, Sample_Group == "WT_TNF_UT" & 
-                            GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
+# Wilcoxon test for GSVA (TIAN_TNF_SIGNALING_VIA_NFKB)
+wt_TNF <- subset(gsva_res_merged, Sample_Group == "WT_TNF_1H" &
+                            GeneSet == "TIAN_TNF_SIGNALING_VIA_NFKB")$GSVAscore
+wt_UT <- subset(gsva_res_merged, Sample_Group == "WT_TNF_UT" &
+                            GeneSet == "TIAN_TNF_SIGNALING_VIA_NFKB")$GSVAscore
+ea_TNF <- subset(gsva_res_merged, Sample_Group == "EA_TNF_1H" &
+                            GeneSet == "TIAN_TNF_SIGNALING_VIA_NFKB")$GSVAscore
+ea_UT <- subset(gsva_res_merged, Sample_Group == "EA_TNF_UT" &
+                            GeneSet == "TIAN_TNF_SIGNALING_VIA_NFKB")$GSVAscore
+caea_TNF <- subset(gsva_res_merged, Sample_Group == "CAEA_TNF_1H" &
+                            GeneSet == "TIAN_TNF_SIGNALING_VIA_NFKB")$GSVAscore
+caea_UT <- subset(gsva_res_merged, Sample_Group == "CAEA_TNF_UT" &
+                            GeneSet == "TIAN_TNF_SIGNALING_VIA_NFKB")$GSVAscore
 
-res_wt_survival <- wilcox.test(wt_TNF_survival, wt_UT_survival, correct = TRUE)
-res_wt_survival
+res_wt_TNF <- wilcox.test(wt_TNF, wt_UT, correct = TRUE)
+res_ea_TNF <- wilcox.test(ea_TNF, ea_UT, correct = TRUE)
+res_caea_TNF <- wilcox.test(caea_TNF, caea_UT, correct = TRUE)
+res_TNF_ea_vs_wt <- wilcox.test(ea_TNF, wt_TNF, correct = TRUE)
+res_TNF_caea_vs_wt <- wilcox.test(caea_TNF, wt_TNF, correct = TRUE)
+res_TNF_caea_vs_ea <- wilcox.test(caea_TNF, ea_TNF, correct = TRUE)
 
-ea_TNF_survival <- subset(gsva_res_reactome_merged, Sample_Group == "EA_TNF_1H" & 
-                            GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
-ea_UT_survival <- subset(gsva_res_reactome_merged, Sample_Group == "EA_TNF_UT" & 
-                            GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
-
-res_ea_survival <- wilcox.test(ea_TNF_survival, ea_UT_survival, correct = TRUE)
-res_ea_survival
-
-caea_TNF_survival <- subset(gsva_res_reactome_merged, Sample_Group == "CAEA_TNF_1H" & 
-                            GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
-caea_UT_survival <- subset(gsva_res_reactome_merged, Sample_Group == "CAEA_TNF_UT" & 
-                            GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$GSVAscore
-
-res_caea_survival <- wilcox.test(caea_TNF_survival, caea_UT_survival, correct = TRUE)
-res_caea_survival
-```
-```{r}
-# Independence test for GSVA (NFKB Survival Pathway)
-wt_TNF_survival <- subset(gsva_res_reactome_merged, Sample_Group %in% 
-                                      c("WT_TNF_1H",  "WT_TNF_UT") &
-                                      GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")
-ea_TNF_survival <- subset(gsva_res_reactome_merged, Sample_Group %in% 
-                                      c("EA_TNF_1H",  "EA_TNF_UT") &
-                                      GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")
-caea_TNF_survival <- subset(gsva_res_reactome_merged, Sample_Group %in% 
-                                      c("CAEA_TNF_1H",  "CAEA_TNF_UT") &
-                                      GeneSet == "NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")
-
-res_wt_TNF_survival <- independence_test(wt_TNF_survival$GSVAscore ~
-                                                     factor(wt_TNF_survival$Sample_Group, 
-                                                            levels = c("WT_TNF_1H", "WT_TNF_UT")),
-                                                   distribution = "exact",
-                                                   alternative = "greater")
-res_wt_TNF_survival
-
-res_ea_TNF_survival <- independence_test(ea_TNF_survival$GSVAscore ~
-                                                     factor(ea_TNF_survival$Sample_Group, 
-                                                            levels = c("EA_TNF_1H", "EA_TNF_UT")),
-                                                   distribution = "exact",
-                                                   alternative = "greater")
-res_ea_TNF_survival
-
-res_caea_TNF_survival <- independence_test(caea_TNF_survival$GSVAscore ~
-                                                     factor(caea_TNF_survival$Sample_Group, 
-                                                            levels = c("CAEA_TNF_1H", "CAEA_TNF_UT")),
-                                                   distribution = "exact",
-                                                   alternative = "greater")
-res_caea_TNF_survival
+res_wt_TNF
+res_ea_TNF
+res_caea_TNF
+res_TNF_ea_vs_wt
+res_TNF_caea_vs_wt
+res_TNF_caea_vs_ea
 ```
 
 ```{r}
-# Wilcoxon test for GSVA (TNFR2 Non Canonical NFKB Pathway)
-wt_TNF_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "WT_TNF_1H" & 
-                            GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
-wt_UT_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "WT_TNF_UT" & 
-                            GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
+# Wilcoxon test for GSVA (TNF_UP_SIGNATURE)
+wt_TNF <- subset(gsva_res_merged, Sample_Group == "WT_TNF_1H" &
+                            GeneSet == "TNF_UP_SIGNATURE")$GSVAscore
+wt_UT <- subset(gsva_res_merged, Sample_Group == "WT_TNF_UT" &
+                            GeneSet == "TNF_UP_SIGNATURE")$GSVAscore
+ea_TNF <- subset(gsva_res_merged, Sample_Group == "EA_TNF_1H" &
+                            GeneSet == "TNF_UP_SIGNATURE")$GSVAscore
+ea_UT <- subset(gsva_res_merged, Sample_Group == "EA_TNF_UT" &
+                            GeneSet == "TNF_UP_SIGNATURE")$GSVAscore
+caea_TNF <- subset(gsva_res_merged, Sample_Group == "CAEA_TNF_1H" &
+                            GeneSet == "TNF_UP_SIGNATURE")$GSVAscore
+caea_UT <- subset(gsva_res_merged, Sample_Group == "CAEA_TNF_UT" &
+                            GeneSet == "TNF_UP_SIGNATURE")$GSVAscore
 
-res_wt_noncanonical <- wilcox.test(wt_TNF_noncanonical, wt_UT_noncanonical, correct = TRUE)
-res_wt_noncanonical
+res_wt_TNF <- wilcox.test(wt_TNF, wt_UT, correct = TRUE)
+res_ea_TNF <- wilcox.test(ea_TNF, ea_UT, correct = TRUE)
+res_caea_TNF <- wilcox.test(caea_TNF, caea_UT, correct = TRUE)
+res_TNF_ea_vs_wt <- wilcox.test(ea_TNF, wt_TNF, correct = TRUE)
+res_TNF_caea_vs_wt <- wilcox.test(caea_TNF, wt_TNF, correct = TRUE)
+res_TNF_caea_vs_ea <- wilcox.test(caea_TNF, ea_TNF, correct = TRUE)
 
-ea_TNF_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "EA_TNF_1H" & 
-                            GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
-ea_UT_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "EA_TNF_UT" & 
-                            GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
-
-res_ea_noncanonical <- wilcox.test(ea_TNF_noncanonical, ea_UT_noncanonical, correct = TRUE)
-res_ea_noncanonical
-
-caea_TNF_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "CAEA_TNF_1H" & 
-                            GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
-caea_UT_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group == "CAEA_TNF_UT" & 
-                            GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$GSVAscore
-
-res_caea_noncanonical <- wilcox.test(caea_TNF_noncanonical, caea_UT_noncanonical, correct = TRUE)
-res_caea_noncanonical
-```
-```{r}
-# Independence test for GSVA TNFR2_NON_CANONICAL_NF_KB_PATHWAY
-wt_TNF_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group %in% 
-                                      c("WT_TNF_1H",  "WT_TNF_UT") &
-                                      GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")
-ea_TNF_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group %in% 
-                                      c("EA_TNF_1H",  "EA_TNF_UT") &
-                                      GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")
-caea_TNF_noncanonical <- subset(gsva_res_reactome_merged, Sample_Group %in% 
-                                      c("CAEA_TNF_1H",  "CAEA_TNF_UT") &
-                                      GeneSet == "TNFR2_NON_CANONICAL_NF_KB_PATHWAY")
-
-res_wt_TNF_noncanonical <- independence_test(wt_TNF_noncanonical$GSVAscore ~
-                                                     factor(wt_TNF_noncanonical$Sample_Group, 
-                                                            levels = c("WT_TNF_1H", "WT_TNF_UT")),
-                                                   distribution = "exact",
-                                                   alternative = "greater")
-res_wt_TNF_noncanonical
-
-res_ea_TNF_noncanonical <- independence_test(ea_TNF_noncanonical$GSVAscore ~
-                                                     factor(ea_TNF_noncanonical$Sample_Group, 
-                                                            levels = c("EA_TNF_1H", "EA_TNF_UT")),
-                                                   distribution = "exact",
-                                                   alternative = "greater")
-res_ea_TNF_noncanonical
-
-res_caea_TNF_noncanonical <- independence_test(caea_TNF_noncanonical$GSVAscore ~
-                                                     factor(caea_TNF_noncanonical$Sample_Group, 
-                                                            levels = c("CAEA_TNF_1H", "CAEA_TNF_UT")),
-                                                   distribution = "exact",
-                                                   alternative = "greater")
-res_caea_TNF_noncanonical
+res_wt_TNF
+res_ea_TNF
+res_caea_TNF
+res_TNF_ea_vs_wt
+res_TNF_caea_vs_wt
+res_TNF_caea_vs_ea
 ```
 
 ```{r}
-canonical_nfkb_genes <- subset(reactome_genesets, gs_name == "REACTOME_NF_KB_IS_ACTIVATED_AND_SIGNALS_SURVIVAL")$ensembl_gene
-
-data_heatmap <- subset(vsdMat, str_remove(rownames(vsdMat), "\\..*$") %in% canonical_nfkb_genes)
-
-scaled_data = na.omit(t(scale(t(data_heatmap)))) 
-
-ordered_data <- as.data.frame(scaled_data[,coldata$Sample_ID])
-
-ordered_data$ensembl_gene_id_version <- rownames(ordered_data)
-
-ordered_data_temp <- merge(ordered_data, genemap, by="ensembl_gene_id_version")
-
-rownames(ordered_data_temp) <-ordered_data_temp$unique_gene_id
-
-ordered_data <- ordered_data_temp[,coldata$Sample_ID]
-
-group_labels <- factor(coldata$Sample_Group)
-group_labels_unique <- unique(group_labels)
-group_colors <- c("#FF5733", "#33FF57", "#337AFF", "#FF33E9", "#FFD700", "#800080")
-names(group_colors) <- group_labels_unique
-
-
-
-column_annotation <- HeatmapAnnotation(
-  group = group_labels,
-  col = list(group = group_colors)
-)
-
-
-pdf("TNFdataset/Heatmap_TNFdataset_CanonicalNFKB.pdf", width = 6, height = 2)
-Heatmap(ordered_data, 
-        name = "Expression", 
-        show_row_names = TRUE, 
-        show_column_names = TRUE,
-        cluster_columns = FALSE,
-        cluster_rows = TRUE,
-        row_names_gp = gpar(fontsize = 5),
-        top_annotation = column_annotation,
-        column_names_gp = gpar(fontsize = 4))
-dev.off()
+# # Independence test for GSVA (TIAN TNF SIGNALLING VIA NFKB)
+# wt <- subset(gsva_res_merged, Sample_Group %in%
+#                                       c("WT_TNF_1H",  "WT_TNF_UT") &
+#                                       GeneSet == "TIAN_TNF_SIGNALING_VIA_NFKB")
+# ea <- subset(gsva_res_merged, Sample_Group %in%
+#                                       c("EA_TNF_1H",  "EA_TNF_UT") &
+#                                       GeneSet == "TIAN_TNF_SIGNALING_VIA_NFKB")
+# caea <- subset(gsva_res_merged, Sample_Group %in%
+#                                       c("CAEA_TNF_1H",  "CAEA_TNF_UT") &
+#                                       GeneSet == "TIAN_TNF_SIGNALING_VIA_NFKB")
+# ea_vs_wt <- subset(gsva_res_merged, Sample_Group %in%
+#                                       c("EA_TNF_1H",  "WT_TNF_1H") &
+#                                       GeneSet == "TIAN_TNF_SIGNALING_VIA_NFKB")
+# caea_vs_wt <- subset(gsva_res_merged, Sample_Group %in%
+#                                       c("CAEA_TNF_1H",  "WT_TNF_1H") &
+#                                       GeneSet == "TIAN_TNF_SIGNALING_VIA_NFKB")
+# caea_vs_ea <- subset(gsva_res_merged, Sample_Group %in%
+#                                       c("CAEA_TNF_1H",  "EA_TNF_1H") &
+#                                       GeneSet == "TIAN_TNF_SIGNALING_VIA_NFKB")
+# 
+# res_wt <- independence_test(wt$GSVAscore ~ factor(wt$Sample_Group, levels = c("WT_TNF_1H", "WT_TNF_UT")),
+#                                                   distribution = "asymptotic",
+#                                                   alternative = "two.sided")
+# 
+# res_ea <- independence_test(ea$GSVAscore ~ factor(ea$Sample_Group, levels = c("EA_TNF_1H", "EA_TNF_UT")),
+#                                                   distribution = "asymptotic",
+#                                                   alternative = "two.sided")
+# 
+# res_caea <- independence_test(caea$GSVAscore ~ factor(caea$Sample_Group, levels = c("CAEA_TNF_1H", "CAEA_TNF_UT")),
+#                                                       distribution = "asymptotic",
+#                                                       alternative = "two.sided")
+# 
+# res_ea_vs_wt <- independence_test(ea_vs_wt$GSVAscore ~ factor(ea_vs_wt$Sample_Group, levels = c("EA_TNF_1H", "WT_TNF_1H")),
+#                                                   distribution = "asymptotic",
+#                                                   alternative = "two.sided")
+# 
+# res_caea_vs_wt <- independence_test(caea_vs_wt$GSVAscore ~ factor(caea_vs_wt$Sample_Group, levels = c("CAEA_TNF_1H", "WT_TNF_1H")),
+#                                                   distribution = "asymptotic",
+#                                                   alternative = "two.sided")
+# 
+# res_caea_vs_ea <- independence_test(caea_vs_ea$GSVAscore ~ factor(caea_vs_ea$Sample_Group, levels = c("CAEA_TNF_1H", "EA_TNF_1H")),
+#                                                   distribution = "asymptotic",
+#                                                   alternative = "two.sided")
+# 
+# res_wt
+# res_ea
+# res_caea
+# res_ea_vs_wt
+# res_caea_vs_wt
+# res_caea_vs_ea
+```
+```{r}
+# # Independence test for GSVA (TNF_UP_SIGNATURE)
+# wt <- subset(gsva_res_merged, Sample_Group %in%
+#                                       c("WT_TNF_1H",  "WT_TNF_UT") &
+#                                       GeneSet == "TNF_UP_SIGNATURE")
+# ea <- subset(gsva_res_merged, Sample_Group %in%
+#                                       c("EA_TNF_1H",  "EA_TNF_UT") &
+#                                       GeneSet == "TNF_UP_SIGNATURE")
+# caea <- subset(gsva_res_merged, Sample_Group %in%
+#                                       c("CAEA_TNF_1H",  "CAEA_TNF_UT") &
+#                                       GeneSet == "TNF_UP_SIGNATURE")
+# ea_vs_wt <- subset(gsva_res_merged, Sample_Group %in%
+#                                       c("EA_TNF_1H",  "WT_TNF_1H") &
+#                                       GeneSet == "TNF_UP_SIGNATURE")
+# caea_vs_wt <- subset(gsva_res_merged, Sample_Group %in%
+#                                       c("CAEA_TNF_1H",  "WT_TNF_1H") &
+#                                       GeneSet == "TNF_UP_SIGNATURE")
+# caea_vs_ea <- subset(gsva_res_merged, Sample_Group %in%
+#                                       c("CAEA_TNF_1H",  "EA_TNF_1H") &
+#                                       GeneSet == "TNF_UP_SIGNATURE")
+# 
+# res_wt <- independence_test(wt$GSVAscore ~ factor(wt$Sample_Group, levels = c("WT_TNF_1H", "WT_TNF_UT")),
+#                                                   distribution = "asymptotic",
+#                                                   alternative = "two.sided")
+# 
+# res_ea <- independence_test(ea$GSVAscore ~ factor(ea$Sample_Group, levels = c("EA_TNF_1H", "EA_TNF_UT")),
+#                                                   distribution = "asymptotic",
+#                                                   alternative = "two.sided")
+# 
+# res_caea <- independence_test(caea$GSVAscore ~ factor(caea$Sample_Group, levels = c("CAEA_TNF_1H", "CAEA_TNF_UT")),
+#                                                       distribution = "asymptotic",
+#                                                       alternative = "two.sided")
+# 
+# res_ea_vs_wt <- independence_test(ea_vs_wt$GSVAscore ~ factor(ea_vs_wt$Sample_Group, levels = c("EA_TNF_1H", "WT_TNF_1H")),
+#                                                   distribution = "asymptotic",
+#                                                   alternative = "two.sided")
+# 
+# res_caea_vs_wt <- independence_test(caea_vs_wt$GSVAscore ~ factor(caea_vs_wt$Sample_Group, levels = c("CAEA_TNF_1H", "WT_TNF_1H")),
+#                                                   distribution = "asymptotic",
+#                                                   alternative = "two.sided")
+# 
+# res_caea_vs_ea <- independence_test(caea_vs_ea$GSVAscore ~ factor(caea_vs_ea$Sample_Group, levels = c("CAEA_TNF_1H", "EA_TNF_1H")),
+#                                                   distribution = "asymptotic",
+#                                                   alternative = "two.sided")
+# 
+# res_wt
+# res_ea
+# res_caea
+# res_ea_vs_wt
+# res_caea_vs_wt
+# res_caea_vs_ea
 ```
 
 ```{r}
-tnf_superfamily_nfkb_genes <- subset(reactome_genesets, gs_name == "REACTOME_TNF_RECEPTOR_SUPERFAMILY_TNFSF_MEMBERS_MEDIATING_NON_CANONICAL_NF_KB_PATHWAY")$ensembl_gene
+discovery_genes <- c("ENSG00000104081.14")
 
-data_heatmap <- subset(vsdMat, str_remove(rownames(vsdMat), "\\..*$") %in% tnf_superfamily_nfkb_genes)
+vsd_counts_melted_selectedgenes <- subset(vsdmelted, ensembl_gene_id_version %in% discovery_genes)
 
-scaled_data = na.omit(t(scale(t(data_heatmap)))) 
-
-ordered_data <- as.data.frame(scaled_data[,coldata$Sample_ID])
-
-ordered_data$ensembl_gene_id_version <- rownames(ordered_data)
-
-ordered_data_temp <- merge(ordered_data, genemap, by="ensembl_gene_id_version")
-
-rownames(ordered_data_temp) <-ordered_data_temp$unique_gene_id
-
-ordered_data <- ordered_data_temp[,coldata$Sample_ID]
-
-group_labels <- factor(coldata$Sample_Group)
-group_labels_unique <- unique(group_labels)
-group_colors <- c("#FF5733", "#33FF57", "#337AFF", "#FF33E9", "#FFD700", "#800080")
-names(group_colors) <- group_labels_unique
-
-
-
-column_annotation <- HeatmapAnnotation(
-  group = group_labels,
-  col = list(group = group_colors)
-)
-
-
-pdf("TNFdataset/Heatmap_TNFdataset_TNFsuperfamilyNFKB.pdf", width = 6, height = 2)
-Heatmap(ordered_data, 
-        name = "Expression", 
-        show_row_names = TRUE, 
-        show_column_names = TRUE,
-        cluster_columns = FALSE,
-        cluster_rows = TRUE,
-        row_names_gp = gpar(fontsize = 5),
-        top_annotation = column_annotation,
-        column_names_gp = gpar(fontsize = 4))
-dev.off()
-```
-
-```{r}
-tnfr2_noncanonical_nfkb_genes <- subset(reactome_genesets, gs_name == "REACTOME_TNFR2_NON_CANONICAL_NF_KB_PATHWAY")$ensembl_gene
-
-data_heatmap <- subset(vsdMat, str_remove(rownames(vsdMat), "\\..*$") %in% tnfr2_noncanonical_nfkb_genes)
-
-scaled_data = na.omit(t(scale(t(data_heatmap)))) 
-
-ordered_data <- as.data.frame(scaled_data[,coldata$Sample_ID])
-
-ordered_data$ensembl_gene_id_version <- rownames(ordered_data)
-
-ordered_data_temp <- merge(ordered_data, genemap, by="ensembl_gene_id_version")
-
-rownames(ordered_data_temp) <-ordered_data_temp$unique_gene_id
-
-ordered_data <- ordered_data_temp[,coldata$Sample_ID]
-
-group_labels <- factor(coldata$Sample_Group)
-group_labels_unique <- unique(group_labels)
-group_colors <- c("#FF5733", "#33FF57", "#337AFF", "#FF33E9", "#FFD700", "#800080")
-names(group_colors) <- group_labels_unique
-
-
-
-column_annotation <- HeatmapAnnotation(
-  group = group_labels,
-  col = list(group = group_colors)
-)
-
-
-pdf("TNFdataset/Heatmap_TNFdataset_TNFR2noncanonicalNFKB.pdf", width = 6, height = 7)
-Heatmap(ordered_data, 
-        name = "Expression", 
-        show_row_names = TRUE, 
-        show_column_names = TRUE,
-        cluster_columns = FALSE,
-        cluster_rows = TRUE,
-        row_names_gp = gpar(fontsize = 5),
-        top_annotation = column_annotation,
-        column_names_gp = gpar(fontsize = 4))
-dev.off()
-```
-
-```{r}
-vsd_counts_melted_selectedgenes <- subset(vsdmelted, ensembl_gene_id_version %in% selected_genes)
-
-vsd_counts_melted_selectedgenes_annotated <- merge(vsd_counts_melted_selectedgenes, coldata, by="Sample_ID") 
+vsd_counts_melted_selectedgenes_annotated <- merge(vsd_counts_melted_selectedgenes, coldata, by="Sample_ID")
 
 vsd_counts_melted_selectedgenes_annotated$Sample_Group <- factor(vsd_counts_melted_selectedgenes_annotated$Sample_Group, levels =
-                                                                   c("WT_TNF_UT", "WT_TNF_1H", 
+                                                                   c("WT_TNF_UT", "WT_TNF_1H",
                                                                      "EA_TNF_UT","EA_TNF_1H",
                                                                      "CAEA_TNF_UT", "CAEA_TNF_1H"))
 
@@ -745,13 +1322,13 @@ vsd_counts_melted_selectedgenes_annotated <- vsd_counts_melted_selectedgenes_ann
 
 #Not actually subsetting here because we are choosing the entire dataset but this is how to subset in case if it is needed.
 vsd_counts_melted_selectedgenes_annotated_subset <- subset(vsd_counts_melted_selectedgenes_annotated, Sample_Group %in%
-                                                             c("WT_TNF_UT", "WT_TNF_1H", 
+                                                             c("WT_TNF_UT", "WT_TNF_1H",
                                                                "EA_TNF_UT","EA_TNF_1H",
                                                                "CAEA_TNF_UT", "CAEA_TNF_1H"))
 
 
 # Start a new PDF file with 1 plot per page
-pdf("TNFdataset/gene_boxplots_TNFdataset.pdf", width = 1.8, height=3)
+pdf("TNFdataset/gene_boxplots_discovery.pdf", width = 1.8, height=3)
 
 # Loop over each gene and create a plot on a new page
 for (g in unique(vsd_counts_melted_selectedgenes_annotated_subset$ensembl_gene_id_version)) {
@@ -761,20 +1338,20 @@ for (g in unique(vsd_counts_melted_selectedgenes_annotated_subset$ensembl_gene_i
   p <- ggplot(gene_data, aes(x = Sample_Group, y = Count, color = Sample_Group)) +
     geom_boxplot(outlier.shape = NA) +
     geom_jitter(width = 0.1) +
-    scale_color_manual(values=c("WT_TNF_UT" = "#FF5733",
-                                "WT_TNF_1H" = "#33FF57",
-                                "EA_TNF_UT" = "#337AFF",
-                                "EA_TNF_1H" = "#FF33E9",
-                                "CAEA_TNF_UT" = "#FFD700",
-                                "CAEA_TNF_1H" = "#800080")) +
+    scale_color_manual(values=c("WT_TNF_UT" = "#B0B0B0",
+                  "WT_TNF_1H" = "#696969",
+                  "EA_TNF_UT" = "#ADD8E6",
+                  "EA_TNF_1H" = "#4682B4",
+                  "CAEA_TNF_UT" = "#DDA0DD",
+                  "CAEA_TNF_1H" = "#800080")) +
     ylab("Normalized Count") +
     ggtitle(paste(gene_data$unique_gene_id)) +
     theme_bw() +
-    theme(panel.grid.major = element_blank(), 
+    theme(panel.grid.major = element_blank(),
           panel.grid.minor = element_blank(),
           panel.background = element_blank(),
-          plot.background = element_blank(), 
-          axis.line = element_line(), 
+          plot.background = element_blank(),
+          axis.line = element_line(),
           axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
           plot.title = element_text(size=6),
           axis.title.x = element_blank(),
@@ -784,9 +1361,9 @@ for (g in unique(vsd_counts_melted_selectedgenes_annotated_subset$ensembl_gene_i
     #       strip.background = element_blank(),
     #       strip.placement = "outside",
     #       strip.text = element_text(size = 10, face = "bold"),
-    #       axis.text.x = element_text(angle = 90))+ 
+    #       axis.text.x = element_text(angle = 90))+
     guides(color="none")
-  
+
   # Print the plot for the current gene on a new page
   print(p)
 }
@@ -795,155 +1372,240 @@ for (g in unique(vsd_counts_melted_selectedgenes_annotated_subset$ensembl_gene_i
 dev.off()
 ```
 
-### VOLCANO PLOTS ###
-
 ```{r}
-pdf(file="TNFdataset/Volcano_wt_TNFvsUT.pdf", width=6, height=6)
-ggplot(wt_TNFvsUT_list, aes(x=log2FoldChange, y=(minuslogp)))+
-  geom_point(size=2.25,color="grey", alpha=0.3)+
-  geom_point(data=subset(wt_TNFvsUT_list, minuslogp > 18), size=3,color="darkred", alpha=0.6)+
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
-  xlab("Log2FoldChange")+
-  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
-  ylab("-log10(p-adj)")+
-  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
-  geom_text_repel(data=subset(wt_TNFvsUT_list, minuslogp > 18), aes(label=unique_gene_id),
-                  size=4,
-                  color="black",
-                  nudge_y = 1,
-                  force=10,
-                  min.segment.length = 0,
-                  max.overlaps = Inf)+
-  scale_y_continuous(breaks = seq(0,325,by=25), limits = c(0,325))+
-  scale_x_continuous(breaks = seq(-3,3,by=1), limits = c(-3.2,3.2))
+ea_tnf_interaction_genes <- subset(EATNF_list, pvalue <= 0.001)$ensembl_gene_id_version
+
+vsd_counts_melted_selectedgenes <- subset(vsdmelted, ensembl_gene_id_version %in% ea_tnf_interaction_genes)
+
+vsd_counts_melted_selectedgenes_annotated <- merge(vsd_counts_melted_selectedgenes, coldata, by="Sample_ID")
+
+vsd_counts_melted_selectedgenes_annotated$Sample_Group <- factor(vsd_counts_melted_selectedgenes_annotated$Sample_Group, levels =
+                                                                   c("WT_TNF_UT", "WT_TNF_1H",
+                                                                     "EA_TNF_UT","EA_TNF_1H",
+                                                                     "CAEA_TNF_UT", "CAEA_TNF_1H"))
+
+vsd_counts_melted_selectedgenes_annotated <- vsd_counts_melted_selectedgenes_annotated %>% arrange(Sample_Group)
+
+#Not actually subsetting here because we are choosing the entire dataset but this is how to subset in case if it is needed.
+vsd_counts_melted_selectedgenes_annotated_subset <- subset(vsd_counts_melted_selectedgenes_annotated, Sample_Group %in%
+                                                             c("WT_TNF_UT", "WT_TNF_1H",
+                                                               "EA_TNF_UT","EA_TNF_1H",
+                                                               "CAEA_TNF_UT", "CAEA_TNF_1H"))
+
+
+# Start a new PDF file with 1 plot per page
+pdf("TNFdataset/gene_boxplots_EA_TNF_Interaction.pdf", width = 1.8, height=3)
+
+# Loop over each gene and create a plot on a new page
+for (g in unique(vsd_counts_melted_selectedgenes_annotated_subset$ensembl_gene_id_version)) {
+  # Subset the data for the current gene
+  gene_data <- subset(vsd_counts_melted_selectedgenes_annotated_subset, ensembl_gene_id_version == g)
+  # Create the plot for the current gene
+  p <- ggplot(gene_data, aes(x = Sample_Group, y = Count, color = Sample_Group)) +
+    geom_boxplot(outlier.shape = NA) +
+    geom_jitter(width = 0.1) +
+    scale_color_manual(values=c("WT_TNF_UT" = "#B0B0B0",
+                  "WT_TNF_1H" = "#696969",
+                  "EA_TNF_UT" = "#ADD8E6",
+                  "EA_TNF_1H" = "#4682B4",
+                  "CAEA_TNF_UT" = "#DDA0DD",
+                  "CAEA_TNF_1H" = "#800080")) +
+    ylab("Normalized Count") +
+    ggtitle(paste(gene_data$unique_gene_id)) +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.background = element_blank(),
+          plot.background = element_blank(),
+          axis.line = element_line(),
+          axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+          plot.title = element_text(size=6),
+          axis.title.x = element_blank(),
+          axis.title.y = element_text(size=10))+
+    # theme(axis.title.x = element_blank(),
+    #       axis.ticks.x = element_blank(),
+    #       strip.background = element_blank(),
+    #       strip.placement = "outside",
+    #       strip.text = element_text(size = 10, face = "bold"),
+    #       axis.text.x = element_text(angle = 90))+
+    guides(color="none")
+
+  # Print the plot for the current gene on a new page
+  print(p)
+}
+
+# Close the PDF file
 dev.off()
 ```
 
+### GSEA ###
+
 ```{r}
-pdf(file="TNFdataset/Volcano_ea_TNFvsUT.pdf", width=6, height=6)
-ggplot(ea_TNFvsUT_list, aes(x=log2FoldChange, y=(minuslogp)))+
-  geom_point(size=2.25,color="grey", alpha=0.3)+
-  geom_point(data=subset(ea_TNFvsUT_list, minuslogp > 18), size=3,color="darkred", alpha=0.6)+
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
-  xlab("Log2FoldChange")+
-  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
-  ylab("-log10(p-adj)")+
-  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
-  geom_text_repel(data=subset(ea_TNFvsUT_list, minuslogp > 18), aes(label=unique_gene_id),
-                  size=4,
-                  color="black",
-                  nudge_y = 1,
-                  force=10,
-                  min.segment.length = 0,
-                  max.overlaps = Inf)+
-  scale_y_continuous(breaks = seq(0,325,by=25), limits = c(0,325))+
-  scale_x_continuous(breaks = seq(-3,3,by=1), limits = c(-3.2,3.2))
-dev.off()
+gsea_df <- subset(gsva_df, gs_name == "TNF_UP_SIGNATURE")
 ```
 
 ```{r}
-pdf(file="TNFdataset/Volcano_caea_TNFvsUT.pdf", width=6, height=6)
-ggplot(caea_TNFvsUT_list, aes(x=log2FoldChange, y=(minuslogp)))+
-  geom_point(size=2.25,color="grey", alpha=0.3)+
-  geom_point(data=subset(caea_TNFvsUT_list, minuslogp > 18), size=3,color="darkred", alpha=0.6)+
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
-  xlab("Log2FoldChange")+
-  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
-  ylab("-log10(p-adj)")+
-  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
-  geom_text_repel(data=subset(caea_TNFvsUT_list, minuslogp > 18), aes(label=unique_gene_id),
-                  size=4,
-                  color="black",
-                  nudge_y = 1,
-                  force=10,
-                  min.segment.length = 0,
-                  max.overlaps = Inf)+
-  scale_y_continuous(breaks = seq(0,325,by=25), limits = c(0,325))+
-  scale_x_continuous(breaks = seq(-3,3,by=1), limits = c(-3.2,3.2))
-dev.off()
+# WT GSEA
+WT_TNFvsUT_ranked<-WT_TNFvsUT_list$rank
+names(WT_TNFvsUT_ranked)<-str_remove(WT_TNFvsUT_list$ensembl_gene_id_version, "\\..*$")
+
+enrich_WT_TNFvsUT_GSEAobject <- GSEA(WT_TNFvsUT_ranked, 
+                                          TERM2GENE = gsea_df, 
+                                          eps = 0,
+                                          nPermSimple = 1e4)
+enrich_WT_TNFvsUT_GSEAobject <- setReadable(enrich_WT_TNFvsUT_GSEAobject, 'org.Hs.eg.db', 'ENSEMBL')
+enrich_WT_TNFvsUT <- enrich_WT_TNFvsUT_GSEAobject@result %>%
+  dplyr::mutate(signed_padj = sign(NES)*-log10(p.adjust)) %>%
+  dplyr::arrange(desc(signed_padj))
+
+#saveRDS(reac_enrich_wt_TNFvsUT_GSEAobject, "TNFdataset/GSEA/reac_enrich_wt_TNFvsUT_GSEAobject.RDS")
+```
+```{r}
+# EA GSEA
+EA_TNFvsUT_ranked<-EA_TNFvsUT_list$rank
+names(EA_TNFvsUT_ranked)<-str_remove(EA_TNFvsUT_list$ensembl_gene_id_version, "\\..*$")
+
+enrich_EA_TNFvsUT_GSEAobject <- GSEA(EA_TNFvsUT_ranked, 
+                                          TERM2GENE = gsea_df, 
+                                          eps = 0,
+                                          nPermSimple = 1e4)
+enrich_EA_TNFvsUT_GSEAobject <- setReadable(enrich_EA_TNFvsUT_GSEAobject, 'org.Hs.eg.db', 'ENSEMBL')
+enrich_EA_TNFvsUT <- enrich_EA_TNFvsUT_GSEAobject@result %>%
+  dplyr::mutate(signed_padj = sign(NES)*-log10(p.adjust)) %>%
+  dplyr::arrange(desc(signed_padj))
+
+#saveRDS(reac_enrich_wt_TNFvsUT_GSEAobject, "TNFdataset/GSEA/reac_enrich_wt_TNFvsUT_GSEAobject.RDS")
 ```
 
 ```{r}
-pdf(file="TNFdataset/Volcano_TNF_EAvsWT.pdf", width=6, height=6)
-ggplot(TNF_EAvsWT_list, aes(x=log2FoldChange, y=(minuslogp)))+
-  geom_point(size=2.25,color="grey", alpha=0.3)+
-  geom_point(data=subset(TNF_EAvsWT_list, minuslogp > 18), size=3,color="darkred", alpha=0.6)+
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
-  xlab("Log2FoldChange")+
-  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
-  ylab("-log10(p-adj)")+
-  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
-  geom_text_repel(data=subset(TNF_EAvsWT_list, minuslogp > 18), aes(label=unique_gene_id),
-                  size=4,
-                  color="black",
-                  nudge_y = 1,
-                  force=10,
-                  min.segment.length = 0,
-                  max.overlaps = Inf)+
-  scale_y_continuous(breaks = seq(0,325,by=25), limits = c(0,325))+
-  scale_x_continuous(breaks = seq(-3,3,by=1), limits = c(-3.2,3.2))
-dev.off()
+# CAEA GSEA
+CAEA_TNFvsUT_ranked<-CAEA_TNFvsUT_list$rank
+names(CAEA_TNFvsUT_ranked)<-str_remove(CAEA_TNFvsUT_list$ensembl_gene_id_version, "\\..*$")
+
+enrich_CAEA_TNFvsUT_GSEAobject <- GSEA(CAEA_TNFvsUT_ranked, 
+                                          TERM2GENE = gsea_df, 
+                                          eps = 0,
+                                          nPermSimple = 1e4)
+enrich_CAEA_TNFvsUT_GSEAobject <- setReadable(enrich_CAEA_TNFvsUT_GSEAobject, 'org.Hs.eg.db', 'ENSEMBL')
+enrich_CAEA_TNFvsUT <- enrich_CAEA_TNFvsUT_GSEAobject@result %>%
+  dplyr::mutate(signed_padj = sign(NES)*-log10(p.adjust)) %>%
+  dplyr::arrange(desc(signed_padj))
+
+#saveRDS(reac_enrich_wt_TNFvsUT_GSEAobject, "TNFdataset/GSEA/reac_enrich_wt_TNFvsUT_GSEAobject.RDS")
+```
+```{r}
+# TNF treated CAEA vs EA GSEA
+TNF_CAEAvsEA_ranked<-TNF_CAEAvsEA_list$rank
+names(TNF_CAEAvsEA_ranked)<-str_remove(TNF_CAEAvsEA_list$ensembl_gene_id_version, "\\..*$")
+
+enrich_TNF_CAEAvsEA_GSEAobject <- GSEA(TNF_CAEAvsEA_ranked, 
+                                          TERM2GENE = gsea_df, 
+                                          eps = 0,                                          
+                                          pvalueCutoff = 1,
+                                          nPermSimple = 1e4)
+enrich_TNF_CAEAvsEA_GSEAobject <- setReadable(enrich_TNF_CAEAvsEA_GSEAobject, 'org.Hs.eg.db', 'ENSEMBL')
+enrich_TNF_CAEAvsEA <- enrich_TNF_CAEAvsEA_GSEAobject@result %>%
+  dplyr::mutate(signed_padj = sign(NES)*-log10(p.adjust)) %>%
+  dplyr::arrange(desc(signed_padj))
+
+#saveRDS(reac_enrich_wt_TNFvsUT_GSEAobject, "TNFdataset/GSEA/reac_enrich_wt_TNFvsUT_GSEAobject.RDS")
 ```
 
 ```{r}
-pdf(file="TNFdataset/Volcano_TNF_CAEAvsEA.pdf", width=6, height=6)
-ggplot(TNF_CAEAvsEA_list, aes(x=log2FoldChange, y=(minuslogp)))+
-  geom_point(size=2.25,color="grey", alpha=0.3)+
-  geom_point(data=subset(TNF_CAEAvsEA_list, minuslogp > 30), size=3,color="darkred", alpha=0.6)+
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
-  xlab("Log2FoldChange")+
-  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
-  ylab("-log10(p-adj)")+
-  theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
-  geom_text_repel(data=subset(TNF_CAEAvsEA_list, minuslogp > 30), aes(label=unique_gene_id),
-                  size=4,
-                  color="black",
-                  nudge_y = 1,
-                  force=10,
-                  min.segment.length = 0,
-                  max.overlaps = Inf)+
-  scale_y_continuous(breaks = seq(0,325,by=25), limits = c(0,325))+
-  scale_x_continuous(breaks = seq(-3,3,by=1), limits = c(-3.2,3.2))
-dev.off()
+# TNF treated CAEA vs WT GSEA
+TNF_CAEAvsWT_ranked<-TNF_CAEAvsWT_list$rank
+names(TNF_CAEAvsWT_ranked)<-str_remove(TNF_CAEAvsWT_list$ensembl_gene_id_version, "\\..*$")
+
+enrich_TNF_CAEAvsWT_GSEAobject <- GSEA(TNF_CAEAvsWT_ranked, 
+                                          TERM2GENE = gsea_df, 
+                                          eps = 0,
+                                          pvalueCutoff = 1,
+                                          nPermSimple = 1e4)
+enrich_TNF_CAEAvsWT_GSEAobject <- setReadable(enrich_TNF_CAEAvsWT_GSEAobject, 'org.Hs.eg.db', 'ENSEMBL')
+enrich_TNF_CAEAvsWT <- enrich_TNF_CAEAvsWT_GSEAobject@result %>%
+  dplyr::mutate(signed_padj = sign(NES)*-log10(p.adjust)) %>%
+  dplyr::arrange(desc(signed_padj))
+
+#saveRDS(reac_enrich_wt_TNFvsUT_GSEAobject, "TNFdataset/GSEA/reac_enrich_wt_TNFvsUT_GSEAobject.RDS")
+```
+
+```{r}
+# TNF treated EA vs WT GSEA
+TNF_EAvsWT_ranked<-TNF_EAvsWT_list$rank
+names(TNF_EAvsWT_ranked)<-str_remove(TNF_EAvsWT_list$ensembl_gene_id_version, "\\..*$")
+
+enrich_TNF_EAvsWT_GSEAobject <- GSEA(TNF_EAvsWT_ranked, 
+                                          TERM2GENE = gsea_df, 
+                                          eps = 0,
+                                          pvalueCutoff = 1,
+                                          nPermSimple = 1e4)
+enrich_TNF_EAvsWT_GSEAobject <- setReadable(enrich_TNF_EAvsWT_GSEAobject, 'org.Hs.eg.db', 'ENSEMBL')
+enrich_TNF_EAvsWT <- enrich_TNF_EAvsWT_GSEAobject@result %>%
+  dplyr::mutate(signed_padj = sign(NES)*-log10(p.adjust)) %>%
+  dplyr::arrange(desc(signed_padj))
+
+#saveRDS(reac_enrich_wt_TNFvsUT_GSEAobject, "TNFdataset/GSEA/reac_enrich_wt_TNFvsUT_GSEAobject.RDS")
 ```
 
 ### GSEA VISUALIZATIONS ###
 
 ```{r}
-geneSetID_wt_TNFvsUT = match(unique(reactome_genesets_subset$gs_name), 
-                                 reac_enrich_wt_TNFvsUT_GSEAobject@result[["ID"]])
-geneSetID_ea_TNFvsUT = match(unique(reactome_genesets_subset$gs_name), 
-                                 reac_enrich_ea_TNFvsUT_GSEAobject@result[["ID"]])
-geneSetID_caea_TNFvsUT = match(unique(reactome_genesets_subset$gs_name), 
-                                 reac_enrich_caea_TNFvsUT_GSEAobject@result[["ID"]])
+geneSetID_WT_TNFvsUT = match(unique(gsea_df$gs_name), 
+                                 enrich_WT_TNFvsUT_GSEAobject@result[["ID"]])
+geneSetID_EA_TNFvsUT = match(unique(gsea_df$gs_name), 
+                                 enrich_EA_TNFvsUT_GSEAobject@result[["ID"]])
+geneSetID_CAEA_TNFvsUT = match(unique(gsea_df$gs_name), 
+                                 enrich_CAEA_TNFvsUT_GSEAobject@result[["ID"]])
+geneSetID_TNF_EAvsWT = match(unique(gsea_df$gs_name), 
+                                 enrich_TNF_EAvsWT_GSEAobject@result[["ID"]])
+geneSetID_TNF_CAEAvsEA = match(unique(gsea_df$gs_name), 
+                                 enrich_TNF_CAEAvsEA_GSEAobject@result[["ID"]])
+geneSetID_TNF_CAEAvsWT = match(unique(gsea_df$gs_name), 
+                                 enrich_TNF_CAEAvsWT_GSEAobject@result[["ID"]])
 
-pdf("TNFdataset/GSEA/gseaplot2_wt_TNFvsUT.pdf", width=12, height=9)
-gseaplot2(reac_enrich_wt_TNFvsUT_GSEAobject, geneSetID = geneSetID_wt_TNFvsUT[!is.na(geneSetID_wt_TNFvsUT)], 
-          pvalue_table = FALSE, 
-          title="NFkB Signature Enrichment",
-          base_size = 16,
+pdf("TNFdataset/GSEA/gseaplot2_WT_TNFvsUT.pdf", width=8, height=4.5)
+gseaplot2(enrich_WT_TNFvsUT_GSEAobject, geneSetID = geneSetID_WT_TNFvsUT[!is.na(geneSetID_WT_TNFvsUT)], 
+          pvalue_table = TRUE, 
+          title="WT TNF vs UT",
           rel_heights = c(2,0.3,0.5))
 dev.off()
 
-pdf("TNFdataset/GSEA/gseaplot2_ea_TNFvsUT.pdf", width=12, height=9)
-gseaplot2(reac_enrich_ea_TNFvsUT_GSEAobject, geneSetID = geneSetID_ea_TNFvsUT[!is.na(geneSetID_ea_TNFvsUT)], 
-          pvalue_table = FALSE, 
-          title="NFkB Signature Enrichment",
-          base_size = 16,
+pdf("TNFdataset/GSEA/gseaplot2_EA_TNFvsUT.pdf", width=8, height=4.5)
+gseaplot2(enrich_EA_TNFvsUT_GSEAobject, geneSetID = geneSetID_EA_TNFvsUT[!is.na(geneSetID_EA_TNFvsUT)], 
+          pvalue_table = TRUE, 
+          title="EA TNF vs UT",
           rel_heights = c(2,0.3,0.5))
 dev.off()
 
-pdf("TNFdataset/GSEA/gseaplot2_caea_TNFvsUT.pdf", width=12, height=9)
-gseaplot2(reac_enrich_caea_TNFvsUT_GSEAobject, geneSetID = geneSetID_caea_TNFvsUT[!is.na(geneSetID_caea_TNFvsUT)], 
-          pvalue_table = FALSE, 
-          title="NFkB Signature Enrichment",
+pdf("TNFdataset/GSEA/gseaplot2_CAEA_TNFvsUT.pdf", width=8, height=4.5)
+gseaplot2(enrich_CAEA_TNFvsUT_GSEAobject, geneSetID = geneSetID_CAEA_TNFvsUT[!is.na(geneSetID_CAEA_TNFvsUT)], 
+          pvalue_table = TRUE, 
+          title="CAEA TNF vs UT",
+          rel_heights = c(2,0.3,0.5))
+dev.off()
+
+pdf("TNFdataset/GSEA/gseaplot2_TNF_EAvsWT.pdf", width=8, height=4.5)
+gseaplot2(enrich_TNF_EAvsWT_GSEAobject, geneSetID = geneSetID_TNF_EAvsWT[!is.na(geneSetID_TNF_EAvsWT)], 
+          pvalue_table = TRUE, 
+          title="TNF treated EA vs WT",
+          rel_heights = c(2,0.3,0.5))
+dev.off()
+
+pdf("TNFdataset/GSEA/gseaplot2_TNF_CAEAvsWT.pdf", width=8, height=4.5)
+gseaplot2(enrich_TNF_CAEAvsWT_GSEAobject, geneSetID = geneSetID_TNF_CAEAvsWT[!is.na(geneSetID_TNF_CAEAvsWT)], 
+          pvalue_table = TRUE, 
+          title="TNF treated CAEA vs WT",
+          rel_heights = c(2,0.3,0.5))
+dev.off()
+
+pdf("TNFdataset/GSEA/gseaplot2_TNF_CAEAvsEA.pdf", width=8, height=4.5)
+gseaplot2(enrich_TNF_CAEAvsEA_GSEAobject, geneSetID = geneSetID_TNF_CAEAvsEA[!is.na(geneSetID_TNF_CAEAvsEA)], 
+          pvalue_table = TRUE, 
+          title="TNF treated CAEA vs EA",
           base_size = 16,
           rel_heights = c(2,0.3,0.5))
 dev.off()
 ```
+
+
 
