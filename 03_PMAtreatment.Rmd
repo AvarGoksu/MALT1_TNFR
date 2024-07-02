@@ -188,7 +188,13 @@ ggplot(pcaData, aes(PC1, PC2, color=Sample_Group)) +
   theme(axis.title = element_text(size = 20))+
   ggtitle("PCA Without Batch Effect (PMA Dataset - Sample Groups)") +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line(), plot.title = element_text(size=20))
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line(), plot.title = element_text(size=20))+
+    scale_color_manual(values=c("WT_PMATNF_UT" = "#B0B0B0",
+                  "WT_PMA_2H" = "#696969",
+                  "WT_PMA_2H_TNF_1H" = "#2F4F4F",
+                  "CA_PMATNF_UT" = "#FF9999",
+                  "CA_PMA_2H" = "#FF6347",
+                  "CA_PMA_2H_TNF_1H" = "#B22222"))
 dev.off()
 
 pdf(file="PMAdataset/PCA_vst_BatchRemoved_Batches_PMAdataset.pdf", height=5, width=9)
@@ -926,12 +932,12 @@ for (g in unique(vsd_counts_melted_selectedgenes_annotated_subset$ensembl_gene_i
   p <- ggplot(gene_data, aes(x = Sample_Group, y = Count, color = Sample_Group)) +
     geom_boxplot(outlier.shape = NA) +
     geom_jitter(width = 0.1) +
-    scale_color_manual(values=c("WT_PMATNF_UT" = "#FF5733",
-                                "WT_PMA_2H" = "#33FF57",
-                                "WT_PMA_2H_TNF_1H" = "#337AFF",
-                                "CA_PMATNF_UT" = "#FF33E9",
-                                "CA_PMA_2H" = "#FFD700",
-                                "CA_PMA_2H_TNF_1H" = "#800080")) +
+    scale_color_manual(values=c("WT_PMATNF_UT" = "#B0B0B0",
+                  "WT_PMA_2H" = "#696969",
+                  "WT_PMA_2H_TNF_1H" = "#2F4F4F",
+                  "CA_PMATNF_UT" = "#FF9999",
+                  "CA_PMA_2H" = "#FF6347",
+                  "CA_PMA_2H_TNF_1H" = "#B22222")) +
     ylab("Normalized Count") +
     ggtitle(paste(gene_data$unique_gene_id)) +
     theme_bw() +
@@ -1137,14 +1143,14 @@ write.xlsx(PMATNF_CAvsWT_list, "PMAdataset/PMATNF_CAvsWT.xlsx")
 pdf(file="PMAdataset/VolcanoPlots/Volcano_CAPMAtreatment_Interaction.pdf", width=6, height=6)
 ggplot(CAPMAtreatment_list, aes(x=log2FoldChange, y=(minuslogp)))+
   geom_point(size=2.25,color="grey", alpha=0.3)+
-  geom_point(data=subset(CAPMAtreatment_list, log2FoldChange < -0.3 & minuslogp > 30), size=3,color="darkred", alpha=0.6)+
+  geom_point(data=subset(CAPMAtreatment_list, abs(log2FoldChange) > 0.5 & padj < 0.001), size=3,color="darkred", alpha=0.6)+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
         panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
-  xlab("Effect Size")+
+  xlab("log2FoldChange")+
   theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
   ylab("-log10(p-adj)")+
   theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
-  geom_text_repel(data=subset(CAPMAtreatment_list, log2FoldChange < -0.3 & minuslogp > 30), aes(label=unique_gene_id),
+  geom_text_repel(data=subset(CAPMAtreatment_list, log2FoldChange < -0.5 & minuslogp > 30), aes(label=unique_gene_id),
                   size=4,
                   color="black",
                   nudge_y = 5,
@@ -1158,13 +1164,13 @@ dev.off()
 
 ```{r}
 # CA:PMATNF TREATMENT INTERACTION
-pdf(file="PMAdataset/VolcanoPlots/Volcano_CAPMAtreatment_Interaction.pdf", width=6, height=6)
+pdf(file="PMAdataset/VolcanoPlots/Volcano_CAPMATNFtreatment_Interaction.pdf", width=6, height=6)
 ggplot(CAPMATNFtreatment_list, aes(x=log2FoldChange, y=(minuslogp)))+
   geom_point(size=2.25,color="grey", alpha=0.3)+
-  geom_point(data=subset(CAPMATNFtreatment_list, log2FoldChange < -0.3 & minuslogp > 30), size=3,color="darkred", alpha=0.6)+
+  geom_point(data=subset(CAPMATNFtreatment_list, abs(log2FoldChange) > 0.5 & padj < 0.001), size=3,color="darkred", alpha=0.6)+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
         panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
-  xlab("Effect Size")+
+  xlab("log2FoldChange")+
   theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
   ylab("-log10(p-adj)")+
   theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
@@ -1185,10 +1191,10 @@ dev.off()
 pdf(file="PMAdataset/VolcanoPlots/Volcano_PMA_CAvsWT.pdf", width=6, height=6)
 ggplot(PMA_CAvsWT_list, aes(x=log2FoldChange, y=(minuslogp)))+
   geom_point(size=2.25,color="grey", alpha=0.3)+
-  geom_point(data=subset(PMA_CAvsWT_list, log2FoldChange < -0.5 & minuslogp > 120), size=3,color="darkred", alpha=0.6)+
+  geom_point(data=subset(PMA_CAvsWT_list, abs(log2FoldChange) > 0.5 & padj < 0.001), size=3,color="darkred", alpha=0.6)+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
         panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
-  xlab("Effect Size")+
+  xlab("log2FoldChange")+
   theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
   ylab("-log10(p-adj)")+
   theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
@@ -1212,7 +1218,7 @@ ggplot(PMATNF_CAvsWT_list, aes(x=log2FoldChange, y=(minuslogp)))+
   geom_point(data=subset(PMATNF_CAvsWT_list, log2FoldChange < -0.5 & minuslogp > 100), size=3,color="darkred", alpha=0.6)+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
         panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
-  xlab("Effect Size")+
+  xlab("log2FoldChange")+
   theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
   ylab("-log10(p-adj)")+
   theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+

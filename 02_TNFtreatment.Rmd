@@ -25,6 +25,7 @@ library(msigdbr)
 library(ReactomePA)
 library(coin)
 library(glmGamPoi)
+library(circlize)
 ```
 
 ```{r}
@@ -314,10 +315,10 @@ write.xlsx(CAEAvsWT_list, "TNFdataset/CAEAvsWT.xlsx")
 ```
 
 ```{r}
-res_CAEAvsEA <- DESeq2::results(dds, contrast=c("Genotype","CAEA","EA"), alpha = 0.05)
-summary(res_CAEAvsEA)
+res_EAvsCAEA <- DESeq2::results(dds, contrast=c("Genotype","EA","CAEA"), alpha = 0.05)
+summary(res_EAvsCAEA)
 
-CAEAvsEA_list<-data.frame(gene = rownames(res_CAEAvsEA), res_CAEAvsEA, stringsAsFactors = F) %>% 
+EAvsCAEA_list<-data.frame(gene = rownames(res_EAvsCAEA), res_EAvsCAEA, stringsAsFactors = F) %>% 
   na.omit() %>% 
   dplyr::select("log2FoldChange", "padj") %>% 
   tibble::rownames_to_column(var = "ensembl_gene_id_version") %>% 
@@ -328,19 +329,19 @@ CAEAvsEA_list<-data.frame(gene = rownames(res_CAEAvsEA), res_CAEAvsEA, stringsAs
   merge(genemap, by="ensembl_gene_id_version") %>%
   dplyr::arrange(desc(signed_padj)) 
 
-CAEAvsEA_pos <- subset(CAEAvsEA_list, signed_padj > 0) %>%
+EAvsCAEA_pos <- subset(EAvsCAEA_list, signed_padj > 0) %>%
   arrange(signed_padj, abs(log2FoldChange)) %>%
   mutate(rank = row_number()) %>%
   arrange(desc(rank))
 
-CAEAvsEA_neg <- subset(CAEAvsEA_list, signed_padj < 0) %>%
+EAvsCAEA_neg <- subset(EAvsCAEA_list, signed_padj < 0) %>%
   arrange(desc(signed_padj), abs(log2FoldChange)) %>%
   mutate(rank = -row_number()) %>%
   arrange(desc(rank))
 
-CAEAvsEA_list <- bind_rows(CAEAvsEA_pos, CAEAvsEA_neg) %>% dplyr::arrange(desc(rank))
+EAvsCAEA_list <- bind_rows(EAvsCAEA_pos, EAvsCAEA_neg) %>% dplyr::arrange(desc(rank))
 
-write.xlsx(CAEAvsEA_list, "TNFdataset/CAEAvsEA.xlsx")
+write.xlsx(EAvsCAEA_list, "TNFdataset/EAvsCAEA.xlsx")
 ```
 
 ### Interaction Effects
@@ -782,22 +783,35 @@ CAEA_EA_merged <- merge(CAEAvsWT_list, EAvsWT_list, by="hgnc_symbol", suffixes =
                                .default = signed_padj.EA)
   )
 
+CAEAonly_genes_df <- subset(CAEA_EA_merged, padj.EA > 0.001) %>% subset(padj.CAEA < 0.001) %>% dplyr::arrange(desc(minuslogp.CAEA))
+EAonly_genes_df <- subset(CAEA_EA_merged, padj.CAEA > 0.001) %>% subset(padj.EA < 0.001) %>% dplyr::arrange(desc(minuslogp.EA))
+  
+   
 pdf(file="TNFdataset/signlog/signlog_Genotype_CAEA_EA.pdf", width=8, height=8)
 ggplot(CAEA_EA_merged, aes(x=signed_padj.CAEA, y=signed_padj.EA))+
-  geom_point(color="grey60", alpha=0.6)+
+  geom_point(color="grey80", alpha=0.6)+
+  geom_point(data=EAonly_genes_df, color="#ADD8E6")+
+  geom_point(data=CAEAonly_genes_df, color="#DDA0DD")+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
         panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
-  geom_text_repel(data=subset(CAEA_EA_merged, signed_padj.EA > 10 | 
-                                signed_padj.EA < -12.5 |
-                                signed_padj.CAEA > 50 |
-                                signed_padj.CAEA < -25), 
+  geom_text_repel(data=head(EAonly_genes_df,n=10), 
                   aes(label=hgnc_symbol),
                   size=4,
                   color="black",
                   nudge_y = 1,
                   force=10,
                   min.segment.length = 0,
-                  max.overlaps = Inf)
+                  max.overlaps = Inf)+
+  geom_text_repel(data=head(CAEAonly_genes_df,n=10), 
+                  aes(label=hgnc_symbol),
+                  size=4,
+                  color="black",
+                  nudge_y = 1,
+                  force=10,
+                  min.segment.length = 0,
+                  max.overlaps = Inf)+
+    xlab("sign(log2FoldChange)x(-log10padj) [CAEA]")+
+    ylab("sign(log2FoldChange)x(-log10padj) [EA]")
 dev.off()
 ```
 
@@ -807,7 +821,7 @@ dev.off()
 #             subset(ea_TNFvsUT_list, abs(log2FoldChange) >= 0.5 & padj <= 0.05)$ensembl_gene_id_version),
 #   subset(caea_TNFvsUT_list, abs(log2FoldChange) >= 0.5 & padj <= 0.05)$ensembl_gene_id_version))
 
-tnfUP_signature <- subset(TNFvsUT_list, padj <= 0.001 & log2FoldChange > log2(1.5))$ensembl_gene_id_version
+tnfUP_signature <- subset(TNFvsUT_list, padj <= 0.001 & log2FoldChange >= 0.5)$ensembl_gene_id_version
 saveRDS(tnfUP_signature, "tnfUP_signature.RDS")
 #EAvsWT_list_subset <- subset(EAvsWT_list, padj <= 0.001)$ensembl_gene_id_version
 
@@ -846,7 +860,7 @@ dev.off()
 pdf(file="TNFdataset/VolcanoPlots/Volcano_EAvsWT.pdf", width=6, height=6)
 ggplot(EAvsWT_list, aes(x=log2FoldChange, y=(minuslogp)))+
   geom_point(size=2,color="grey", alpha=0.3)+
-  geom_point(data=subset(EAvsWT_list, padj < 0.001), size=2,color="darkred", alpha=0.4)+
+  geom_point(data=subset(EAvsWT_list, padj < 0.001 & abs(log2FoldChange) > 0.5), size=2,color="darkred", alpha=0.4)+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
         panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
   xlab("log2FoldChange")+
@@ -885,7 +899,7 @@ dev.off()
 pdf(file="TNFdataset/VolcanoPlots/Volcano_CAEAvsWT.pdf", width=6, height=6)
 ggplot(CAEAvsWT_list, aes(x=log2FoldChange, y=(minuslogp)))+
   geom_point(size=2,color="grey", alpha=0.3)+
-  geom_point(data=subset(CAEAvsWT_list, padj < 0.001), size=2,color="darkred", alpha=0.4)+
+  geom_point(data=subset(CAEAvsWT_list, padj < 0.001, abs(log2FoldChange) > log2(1.5)), size=2,color="darkred", alpha=0.4)+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
         panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
   xlab("log2FoldChange")+
@@ -902,6 +916,40 @@ ggplot(CAEAvsWT_list, aes(x=log2FoldChange, y=(minuslogp)))+
                   min.segment.length = 0,
                   max.overlaps = Inf)
 dev.off()
+```
+
+```{r}
+# CAEA vs EA Volcano Plot
+
+# pdf(file="TNFdataset/VolcanoPlots/Volcano_EAvsCAEA.pdf", width=6, height=6)
+# ggplot(EAvsCAEA_list, aes(x=log2FoldChange, y=(minuslogp)))+
+#   geom_point(size=2,color="grey", alpha=0.3)+
+#   geom_point(data=subset(CAEAvsEA_list, padj < 0.001 & abs(log2FoldChange) > 0.5), size=2,color="darkred", alpha=0.4)+
+#   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+#         panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
+#   xlab("log2FoldChange")+
+#   theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
+#   ylab("-log10(p-adj)")+
+#   theme(axis.title = element_text(size = 12, face = "bold"), axis.text=element_text(size=10, face = "bold"))+
+#   scale_y_continuous(breaks = seq(0,135,by=15), limits = c(0,130))+
+#   scale_x_continuous(breaks = seq(-3,2,by=0.5), limits = c(-3,2))+
+#   geom_text_repel(data=subset(CAEAvsEA_list, padj < 0.00001 & log2FoldChange > 0.5), aes(label=unique_gene_id),
+#                   size=3,
+#                   color="black",
+#                   direction = "y",
+#                   nudge_x = 1.2,
+#                   force=10,
+#                   min.segment.length = 0,
+#                   max.overlaps = Inf)+
+#   geom_text_repel(data=subset(CAEAvsEA_list, padj < 0.00001 & log2FoldChange < -0.5), aes(label=unique_gene_id),
+#                   size=3,
+#                   color="black",
+#                   direction = "y",
+#                   nudge_x = -1.2,
+#                   force=10,
+#                   min.segment.length = 0,
+#                   max.overlaps = Inf)
+# dev.off()
 ```
 
 ```{r}
@@ -925,7 +973,7 @@ dev.off()
 ```{r}
 # CA-TNF interaction effect Volcano Plot
 
-pdf(file="TNFdataset/VolcanoPlots/Volcano_CATNFinteraction.pdf", width=6, height=6)
+pdf(file="TNFdataset/VolcanoPlots/Volcano_CAEATNFinteraction.pdf", width=6, height=6)
 ggplot(CAEATNF_list, aes(x=log2FoldChange, y=(minuslogp)))+
   geom_point(size=2,color="grey", alpha=0.3)+
   geom_point(data=subset(CAEATNF_list, padj < 0.001), size=2,color="darkred", alpha=0.6)+
@@ -1307,7 +1355,7 @@ res_TNF_caea_vs_ea
 ```
 
 ```{r}
-discovery_genes <- c("ENSG00000104081.14")
+discovery_genes <- c("ENSG00000105369.10")
 
 vsd_counts_melted_selectedgenes <- subset(vsdmelted, ensembl_gene_id_version %in% discovery_genes)
 

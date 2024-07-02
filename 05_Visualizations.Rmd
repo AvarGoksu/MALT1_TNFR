@@ -1,0 +1,85 @@
+```{r}
+rm(list=ls())
+```
+
+```{r}
+library(reshape2)
+library(ggpubr)
+library(readr)
+library(knitr)
+library(gridExtra)
+library(DESeq2)
+library(ggrepel)
+library(org.Hs.eg.db)
+library(AnnotationDbi)
+library(tidyverse)
+library(enrichplot)
+library(clusterProfiler)
+library(msigdbr)
+library(GSVA)
+library(ComplexHeatmap)
+library(openxlsx)
+library(stringr)
+library(biomaRt)
+library(msigdbr)
+library(coin)
+library(circlize)
+```
+
+```{r}
+CAvsWT_list <- read.xlsx("/Users/slothking/Desktop/Krappmann3/PMAdataset/CAvsWT.xlsx")
+EAvsWT_list <- read.xlsx("/Users/slothking/Desktop/Krappmann3/TNFdataset/EAvsWT.xlsx")
+```
+
+```{r}
+CA_EA_merged <- merge(CAvsWT_list, EAvsWT_list, by="hgnc_symbol", suffixes = c(".CA",".EA"), all=TRUE) %>% 
+  dplyr::mutate(
+    signed_padj.CA = case_when(signed_padj.CA == NA ~ 0,
+                                 .default = signed_padj.CA),
+    signed_padj.EA = case_when(signed_padj.EA == NA ~ 0,
+                               .default = signed_padj.EA)
+  )
+
+CAonly_genes_df <- subset(CA_EA_merged, padj.EA > 0.001) %>% subset(padj.CA < 0.001) %>% dplyr::arrange(desc(minuslogp.CA))
+EAonly_genes_df <- subset(CA_EA_merged, padj.CA > 0.001) %>% subset(padj.EA < 0.001) %>% dplyr::arrange(desc(minuslogp.EA))
+CA_EA_common_genes_df <- subset(CA_EA_merged, padj.EA < 0.001) %>% subset(padj.CA < 0.001) %>%
+  dplyr::mutate(logmean_padj = (minuslogp.CA + minuslogp.EA)/2) %>% 
+  dplyr::arrange(desc(logmean_padj))
+
+   
+pdf(file="signlog_Genotype_CA_EA.pdf", width=8, height=8)
+ggplot(CA_EA_merged, aes(x=signed_padj.CA, y=signed_padj.EA))+
+  geom_point(color="grey80", alpha=0.6)+
+  geom_point(data=EAonly_genes_df, color="#ADD8E6")+
+  geom_point(data=CAonly_genes_df, color="#FF9999")+
+  geom_point(data=CA_EA_common_genes_df, color="#DDA0DD")+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(),plot.background = element_blank(), axis.line = element_line()) +
+  geom_text_repel(data=head(EAonly_genes_df,n=10), 
+                  aes(label=hgnc_symbol),
+                  size=4,
+                  color="black",
+                  nudge_y = 1,
+                  force=10,
+                  min.segment.length = 0,
+                  max.overlaps = Inf)+
+  geom_text_repel(data=head(CAonly_genes_df,n=10), 
+                  aes(label=hgnc_symbol),
+                  size=4,
+                  color="black",
+                  nudge_y = 1,
+                  force=10,
+                  min.segment.length = 0,
+                  max.overlaps = Inf)+
+  geom_text_repel(data=head(CA_EA_common_genes_df,n=10), 
+                  aes(label=hgnc_symbol),
+                  size=4,
+                  color="black",
+                  nudge_y = 1,
+                  force=10,
+                  min.segment.length = 0,
+                  max.overlaps = Inf)+
+    xlab("sign(log2FoldChange)x(-log10padj) [CA]")+
+    ylab("sign(log2FoldChange)x(-log10padj) [EA]")
+dev.off()
+```
