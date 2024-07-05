@@ -1135,6 +1135,40 @@ PMATNF_CAvsWT_list <- bind_rows(PMATNF_CAvsWT_pos, PMATNF_CAvsWT_neg) %>% dplyr:
 
 write.xlsx(PMATNF_CAvsWT_list, "PMAdataset/PMATNF_CAvsWT.xlsx")
 ```
+### CA - PMA Signatures ###
+```{r}
+### CA - PMA Signatures ###
+
+PMA_CAvsWT_UP <- subset(PMA_CAvsWT_list, padj < 0.001 & log2FoldChange >= 0.5) %>% dplyr::arrange(desc(minuslogp))
+PMA_CAvsWT_DN <- subset(PMA_CAvsWT_list, padj < 0.001 & log2FoldChange <= -0.5) %>% dplyr::arrange(desc(minuslogp))
+PMAxCA_UP <- subset(CAPMAtreatment_list, padj < 0.001 & log2FoldChange >= 0.5) %>% dplyr::arrange(desc(minuslogp))
+PMAxCA_DN <- subset(CAPMAtreatment_list, padj < 0.001 & log2FoldChange <= -0.5) %>% dplyr::arrange(desc(minuslogp))
+
+# Create a new workbook
+wb <- createWorkbook()
+
+addWorksheet(wb, "PMA_CAvsWT_UP")
+addWorksheet(wb, "PMA_CAvsWT_DN")
+addWorksheet(wb, "PMAxCA_UP")
+addWorksheet(wb, "PMAxCA_DN")
+
+# Write the data to the sheet
+writeData(wb, sheet = "PMA_CAvsWT_UP", PMA_CAvsWT_UP)
+writeData(wb, sheet = "PMA_CAvsWT_DN", PMA_CAvsWT_DN)
+writeData(wb, sheet = "PMAxCA_UP", PMAxCA_UP)
+writeData(wb, sheet = "PMAxCA_DN", PMAxCA_DN)
+
+  
+# Optionally, you can set column widths if needed
+setColWidths(wb, sheet = "PMA_CAvsWT_UP", cols = 1:ncol(PMA_CAvsWT_UP), widths = "auto")
+setColWidths(wb, sheet = "PMA_CAvsWT_DN", cols = 1:ncol(PMA_CAvsWT_DN), widths = "auto")
+setColWidths(wb, sheet = "PMAxCA_UP", cols = 1:ncol(PMAxCA_UP), widths = "auto")
+setColWidths(wb, sheet = "PMAxCA_DN", cols = 1:ncol(PMAxCA_DN), widths = "auto")
+
+# Save the workbook
+saveWorkbook(wb, "Signatures_CAPMA.xlsx", overwrite = TRUE)
+```
+
 
 ### VOLCANO PLOTS ###
 

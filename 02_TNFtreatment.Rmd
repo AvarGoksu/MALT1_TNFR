@@ -343,6 +343,32 @@ EAvsCAEA_list <- bind_rows(EAvsCAEA_pos, EAvsCAEA_neg) %>% dplyr::arrange(desc(r
 
 write.xlsx(EAvsCAEA_list, "TNFdataset/EAvsCAEA.xlsx")
 ```
+### EA-CAEA Signatures ###
+
+```{r}
+### EA-CAEA Signatures ###
+EAvsCAEA_UP <- subset(EAvsCAEA_list, padj < 0.001 & log2FoldChange >= 0.5) %>% dplyr::arrange(desc(minuslogp))
+EAvsCAEA_DN <- subset(EAvsCAEA_list, padj < 0.001 & log2FoldChange <= -0.5) %>% dplyr::arrange(desc(minuslogp))
+
+# Create a new workbook
+wb <- createWorkbook()
+
+addWorksheet(wb, "EAvsCAEA_UP")
+addWorksheet(wb, "EAvsCAEA_DN")
+
+# Write the data to the sheet
+writeData(wb, sheet = "EAvsCAEA_UP", EAvsCAEA_UP)
+writeData(wb, sheet = "EAvsCAEA_DN", EAvsCAEA_DN)
+
+
+  
+# Optionally, you can set column widths if needed
+setColWidths(wb, sheet = "EAvsCAEA_UP", cols = 1:ncol(EAvsCAEA_UP), widths = "auto")
+setColWidths(wb, sheet = "EAvsCAEA_DN", cols = 1:ncol(EAvsCAEA_DN), widths = "auto")
+
+# Save the workbook
+saveWorkbook(wb, "Signatures_CAEAvsEA.xlsx", overwrite = TRUE)
+```
 
 ### Interaction Effects
 
